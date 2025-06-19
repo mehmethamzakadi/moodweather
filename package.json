@@ -11,7 +11,7 @@
   "dependencies": {
     "@auth/prisma-adapter": "^2.9.1",
     "@hookform/resolvers": "^5.1.1",
-    "@prisma/client": "^6.10.0",
+    "@prisma/client": "^6.10.1",
     "@radix-ui/react-slot": "^1.2.3",
     "axios": "^1.10.0",
     "class-variance-authority": "^0.7.1",
@@ -21,7 +21,6 @@
     "lucide-react": "^0.517.0",
     "next": "15.3.4",
     "next-auth": "^4.24.11",
-    "prisma": "^6.10.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-hook-form": "^7.58.1",
@@ -37,6 +36,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "15.3.4",
+    "prisma": "^6.10.1",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

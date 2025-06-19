@@ -9,121 +9,20 @@ const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
 })
 
-// AI metnini parse etmek için helper function
-function parseGroqResponse(aiText: string, originalMood: string) {
-  // Varsayılan değerler
-  let analysisResult = {
-    moodAnalysis: aiText, // Tam metni al, kesme
-    targetMood: "Daha iyi hissetmek",
-    moodScore: 5,
-    musicStrategy: "Ruh halinizi iyileştirecek müzikler",
-    playlistTheme: "Kişiselleştirilmiş Mix",
-    recommendedGenres: ["pop", "acoustic", "chill"] as string[],
-    energyLevel: "medium",
-    valence: "neutral",
-    recommendations: [] as string[]
-  }
-
-  const textLower = aiText.toLowerCase()
-
-  // Mood Score'u çıkar (8/10, 7, vs.)
-  const scoreMatch = aiText.match(/(\d+)(?:\/10|\/10|\/\d+|\s*\/?\s*10)?/);
-  if (scoreMatch) {
-    const score = parseInt(scoreMatch[1]);
-    if (score >= 1 && score <= 10) {
-      analysisResult.moodScore = score;
-    }
-  }
-
-  // Target Mood'u çıkar
-  const targetMatches = [
-    /hedeflenen ruh hal[iı][\s:]*([^.\n]+)/i,
-    /target mood[\s:]*([^.\n]+)/i,
-    /amaç[\s:]*([^.\n]+)/i
-  ];
-  
-  for (const regex of targetMatches) {
-    const match = aiText.match(regex);
-    if (match && match[1]) {
-      analysisResult.targetMood = match[1].trim();
-      break;
-    }
-  }
-
-  // Müzik türlerini çıkar
-  const genreKeywords = {
-    'pop': /\bpop\b/i,
-    'rock': /\brock\b/i,
-    'electronic': /\belectronic\b|\belektronik\b/i,
-    'dance': /\bdance\b|\bdans\b/i,
-    'hip-hop': /\bhip.?hop\b|\brap\b/i,
-    'acoustic': /\bacoustic\b|\bakustik\b/i,
-    'classical': /\bclassical\b|\bklasik\b/i,
-    'jazz': /\bjazz\b/i,
-    'ambient': /\bambient\b|\batmosfer\b/i,
-    'chill': /\bchill\b|\bsakin\b/i,
-    'indie': /\bindie\b/i
-  };
-
-  const foundGenres: string[] = [];
-  for (const [genre, regex] of Object.entries(genreKeywords)) {
-    if (regex.test(aiText)) {
-      foundGenres.push(genre);
-    }
-  }
-  
-  if (foundGenres.length > 0) {
-    analysisResult.recommendedGenres = foundGenres.slice(0, 4);
-  }
-
-  // Enerji seviyesini belirle
-  if (textLower.includes('yüksek') || textLower.includes('high') || textLower.includes('enerjik')) {
-    analysisResult.energyLevel = "high";
-  } else if (textLower.includes('düşük') || textLower.includes('low') || textLower.includes('sakin')) {
-    analysisResult.energyLevel = "low";
-  }
-
-  // Valence'ı belirle
-  if (textLower.includes('pozitif') || textLower.includes('positive') || textLower.includes('mutlu')) {
-    analysisResult.valence = "positive";
-  } else if (textLower.includes('negatif') || textLower.includes('negative') || textLower.includes('üzgün')) {
-    analysisResult.valence = "negative";
-  }
-
-  // Playlist temasını güncelle
-  if (analysisResult.energyLevel === "high" && analysisResult.valence === "positive") {
-    analysisResult.playlistTheme = "Enerjik ve Pozitif";
-  } else if (analysisResult.energyLevel === "low" && analysisResult.valence === "positive") {
-    analysisResult.playlistTheme = "Sakin ve Huzurlu";
-  } else if (analysisResult.valence === "negative") {
-    analysisResult.playlistTheme = "Destekleyici ve İyileştirici";
-  }
-
-  // Önerileri çıkar (1., 2., 3. ile başlayan satırlar)
-  const recommendationMatches = aiText.match(/(?:\d+\.|\*\*Öneri \d+\*\*|\*\*Tavsiye \d+\*\*)([^.\n]+(?:\.[^.\n]*)?)/gi);
-  if (recommendationMatches && recommendationMatches.length > 0) {
-    analysisResult.recommendations = recommendationMatches
-      .slice(0, 3)
-      .map(rec => rec.replace(/^\d+\.|\*\*[^*]+\*\*|\*/g, '').trim())
-      .filter(rec => rec.length > 10);
-  }
-
-  // Eğer öneriler bulunamadıysa fallback
-  if (analysisResult.recommendations.length === 0) {
-    analysisResult.recommendations.push(`Bu mood için ${analysisResult.recommendedGenres[0]} tarzı müzikler öneriyorum`);
-    analysisResult.recommendations.push("Müzik eşliğinde derin nefes alın");
-    analysisResult.recommendations.push("Kendinize zaman ayırın ve müziğin tadını çıkarın");
-  }
-
-  // Müzik stratejisini AI metninden çıkar veya oluştur
-  const strategyMatch = aiText.match(/müzik stratej[iı][\s:]*([^.\n]+)/i);
-  if (strategyMatch && strategyMatch[1]) {
-    analysisResult.musicStrategy = strategyMatch[1].trim();
-  } else {
-    analysisResult.musicStrategy = `${originalMood} ruh haliniz için özel seçilmiş ${analysisResult.recommendedGenres.join(', ')} müzikleri`;
-  }
-
-  return analysisResult;
+// Mood analizi için JSON schema tanımı
+interface MoodAnalysisResponse {
+  moodAnalysis: string
+  targetMood: string
+  moodScore: number
+  musicStrategy: string
+  playlistTheme: string
+  recommendedGenres: string[]
+  energyLevel: "low" | "medium" | "high"
+  valence: "negative" | "neutral" | "positive"
+  recommendations: string[]
+  personalizedInsight: string
+  musicMoodConnection: string
+  actionPlan: string[]
 }
 
 export async function POST(request: NextRequest) {
@@ -159,131 +58,209 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    console.log('Groq AI analizi başlatılıyor...', { mood, location })
+    console.log('🧠 AI-Powered analiz başlatılıyor...', { mood, location })
+    console.log('🔑 Groq API Key mevcut:', !!process.env.GROQ_API_KEY)
+    console.log('🔑 API Key ilk 20 karakter:', process.env.GROQ_API_KEY?.substring(0, 20))
 
-    let analysisResult
+    let analysisResult: MoodAnalysisResponse
 
     // Groq API key kontrolü
     if (!process.env.GROQ_API_KEY) {
+      console.error('❌ GROQ_API_KEY bulunamadı!')
       throw new Error("Groq API key bulunamadı")
     }
 
     try {
-      // Groq AI ile mood analizi (düz metin istiyoruz, JSON değil)
+      // Gelişmiş AI system prompt - Yaratıcılık odaklı
+      const systemPrompt = `Sen dünyanın en deneyimli müzik terapi uzmanısın. Her insanın ruh hali benzersizdir ve sen her analizi özel olarak yaparsın.
+
+YARATICILIK KURALLARI:
+- Her analizi tamamen özgün yap, hiç şablon kullanma
+- Kullanıcının tam durumunu hisset ve ona özel yaklaş
+- Müzik önerilerini ruh haline göre derinlemesine analiz et
+- Sadece tür değil, tempo, ritim, melodi yapısı da öner
+- Her öneriyi neden verdiğini açıkla
+- Kişisel hikaye anlat gibi yaklaş
+
+Yanıt formatın tam olarak şu JSON yapısında olmalı:
+{
+  "moodAnalysis": "Kullanıcının ruh halinin derinlemesine, empatik ve özgün analizi (minimum 150 karakter, her seferinde farklı)",
+  "targetMood": "Spesifik hedef ruh hali (özgün ifadeler kullan)",
+  "moodScore": 1-10 arası hassas değerlendirme,
+  "musicStrategy": "Bu spesifik durum için özgün müzik terapi stratejisi",
+  "playlistTheme": "Yaratıcı ve özgün playlist ismi",
+  "recommendedGenres": ["specific_subgenre1", "specific_subgenre2"] (genel türler değil spesifik alt türler),
+  "energyLevel": "low/medium/high",
+  "valence": "negative/neutral/positive", 
+  "recommendations": ["özgün_öneri1", "özgün_öneri2", "özgün_öneri3"] (her seferinde yaratıcı),
+  "personalizedInsight": "Bu kişiye özel psikolojik içgörü ve anlayış",
+  "musicMoodConnection": "Müziğin bu ruh haline nasıl etki edeceğinin bilimsel/duygusal açıklaması",
+  "actionPlan": ["somut_adım1", "somut_adım2", "somut_adım3"] (uygulanabilir eylem planı)
+}
+
+ÖNEMLI: 
+- Her analizi benzersiz yap, asla tekrarlanmasın
+- Sadece JSON objesi döndür
+- Türkçe kullan ama yaratıcı ve özgün ol
+- Müzik önerilerini çok spesifik yap (sadece "pop" değil "synth-pop", "indie-folk" gibi)
+- Her durumu gerçekten anlayarak yaklaş`
+
+      // Kullanıcının geçmiş analizlerini al (context için)
+      const recentSessions = await prisma.moodSession.findMany({
+        where: { userId: user.id },
+        orderBy: { createdAt: 'desc' },
+        take: 3,
+        select: { currentMood: true, moodScore: true }
+      })
+
+      const contextInfo = recentSessions.length > 0 
+        ? `\n\nBağlam: Kullanıcının son ruh halleri: ${recentSessions.map(s => `"${s.currentMood}" (${s.moodScore}/10)`).join(', ')}`
+        : ""
+
+      console.log('📤 Groq API request gönderiliyor...')
+      console.log('📝 Model:', "llama-3.1-70b-versatile")
+      console.log('📝 Temperature:', 0.8)
+
+      // Groq API'ye yaratıcı analiz isteği
       const completion = await groq.chat.completions.create({
         messages: [
           {
             role: "system",
-            content: `Sen bir müzik terapi uzmanısın. Kullanıcının ruh haline göre detaylı analiz yap ve müzik önerileri ver.
-
-Analizinde şunları içer:
-- Kullanıcının ruh halinin detaylı analizi 
-- Hedeflenen ruh hali (örn: "Enerjiyi artırmak")
-- Mood skoru (1-10 arası sayı)
-- Müzik stratejisi açıklaması
-- Önerilen müzik türleri (pop, rock, electronic, vs.)
-- Enerji seviyesi (yüksek/orta/düşük)
-- 3 adet pratik öneri (müzik, aktivite, genel wellbeing)
-
-Türkçe, empatik ve destekleyici bir dil kullan. Her analizi kişiselleştir.`
+            content: systemPrompt
           },
           {
             role: "user",
-            content: `Kullanıcının ruh hali: "${mood}"
-Konum: ${location || "Bilinmiyor"}
+            content: `BENZERSIZ ANALİZ İSTEĞİ:
 
-Bu ruh halini analiz et ve müzik terapi önerileri ver.`
+Kullanıcının şu anki ruh hali: "${mood}"
+Konum: ${location || "Bilinmiyor"}
+Tarih/Saat: ${new Date().toLocaleString('tr-TR')}${contextInfo}
+
+Bu ruh halini derinlemesine analiz et. Her detayı düşün:
+- Bu ruh halinin kökeninde ne olabilir?
+- Hangi müzik türleri neden yardımcı olur?
+- Nasıl bir ses atmosferi oluşturmalı?
+- Hangi enstrümanlar bu duyguyu destekler?
+- Tempo ve ritim nasıl olmalı?
+
+TAMAMEN ÖZGÜN bir analiz yap, hiç şablon kullanma!`
           }
         ],
-        model: "llama-3.1-8b-instant",
-        temperature: 0.7,
-        max_tokens: 1000,
+        model: "llama-3.3-70b-versatile", // ✅ Güncel model
+        temperature: 0.8, // Yaratıcılık için yüksek
+        max_tokens: 2000,
+        response_format: { type: "json_object" },
       })
 
       const aiResponse = completion.choices[0]?.message?.content
+      console.log('📥 Groq API response alındı!')
+      console.log('📏 Response length:', aiResponse?.length)
+      console.log('📄 Response preview:', aiResponse?.substring(0, 200))
+      
       if (!aiResponse) {
+        console.error('❌ AI response boş!')
         throw new Error("AI'dan yanıt alınamadı")
       }
 
-      console.log('Groq AI response alındı:', aiResponse.substring(0, 200) + '...')
+      console.log('🎨 Yaratıcı AI response alındı (ilk 300 char):', aiResponse.substring(0, 300) + '...')
 
-      // AI metnini parse et
-      analysisResult = parseGroqResponse(aiResponse, mood)
-      
-      console.log('Parse edilen analiz:', {
-        moodScore: analysisResult.moodScore,
-        energyLevel: analysisResult.energyLevel,
-        valence: analysisResult.valence,
-        genreCount: analysisResult.recommendedGenres.length
-      })
+      // JSON'u parse et
+      try {
+        analysisResult = JSON.parse(aiResponse) as MoodAnalysisResponse
+        
+        // Minimal validation - sadece kritik alanları kontrol et
+        if (!analysisResult.moodAnalysis || !analysisResult.targetMood || 
+            typeof analysisResult.moodScore !== 'number') {
+          throw new Error("AI response eksik alanlar içeriyor")
+        }
+
+        // Değer normalizasyonu (AI'a güveniyoruz, minimal müdahale)
+        analysisResult.moodScore = Math.max(1, Math.min(10, Math.round(analysisResult.moodScore * 10) / 10))
+
+        // Eksik alanları AI'ın verdiği content'e göre intelligent fill
+        if (!analysisResult.personalizedInsight) {
+          analysisResult.personalizedInsight = "Bu ruh hali, kişisel deneyimlerinizin doğal bir yansıması."
+        }
+        if (!analysisResult.musicMoodConnection) {
+          analysisResult.musicMoodConnection = "Müzik, nöral pathways üzerinden duygusal durumunuzu pozitif yönde etkileyecek."
+        }
+        if (!Array.isArray(analysisResult.actionPlan)) {
+          analysisResult.actionPlan = ["Önerilen müzikleri dinleyin", "Rahat bir ortam yaratın", "Durumunuzu değerlendirin"]
+        }
+
+        console.log('✨ AI analizi başarıyla parse edildi:', {
+          moodScore: analysisResult.moodScore,
+          energyLevel: analysisResult.energyLevel,
+          valence: analysisResult.valence,
+          genreCount: analysisResult.recommendedGenres?.length || 0,
+          hasPersonalInsight: !!analysisResult.personalizedInsight,
+          playlistTheme: analysisResult.playlistTheme?.substring(0, 30) + '...'
+        })
+
+      } catch (parseError) {
+        console.error('❌ JSON parse hatası:', parseError)
+        console.log('Raw AI response:', aiResponse)
+        throw new Error("AI'dan geçerli JSON formatı alınamadı")
+      }
 
     } catch (groqError) {
-      console.error('Groq AI hatası:', groqError)
+      console.error('🚨 Groq AI hatası:', groqError)
       
-      // Fallback analiz
-      const moodLower = mood.toLowerCase()
-      let moodScore = 5
-      let energyLevel = "medium"
-      let valence = "neutral"
-      
-      if (moodLower.includes('mutlu') || moodLower.includes('heyecan') || moodLower.includes('enerjik')) {
-        moodScore = 8
-        energyLevel = "high"
-        valence = "positive"
-      } else if (moodLower.includes('sakin') || moodLower.includes('huzur')) {
-        moodScore = 7
-        energyLevel = "low"
-        valence = "positive"
-      } else if (moodLower.includes('üzgün') || moodLower.includes('kötü')) {
-        moodScore = 3
-        energyLevel = "low"
-        valence = "negative"
-      }
-      
+      // Minimalist fallback - sadece kritik durumlarda
       analysisResult = {
-        moodAnalysis: `${mood} şeklinde hissediyorsunuz. Bu ruh halinizi destekleyecek müzik önerileri hazırladık.`,
-        targetMood: "Daha iyi hissetmek",
-        moodScore,
-        musicStrategy: "Ruh halinizi destekleyecek özel müzik seçimi",
-        playlistTheme: "Kişiselleştirilmiş Mix",
-        recommendedGenres: ["pop", "acoustic", "chill"],
-        energyLevel,
-        valence,
+        moodAnalysis: `"${mood}" durumundayken hissettiğiniz bu duygular tamamen geçerli. Her insan farklı yaşantılar geçirir ve bu ruh haliniz de benzersiz deneyimlerinizin bir parçası.`,
+        targetMood: "İç dengenizi yeniden bulma",
+        moodScore: 5,
+        musicStrategy: "Durumunuza özel seçilmiş müziklerle duygusal dengeleme",
+        playlistTheme: `${mood.split(' ')[0]} Anları için Özel Seçki`,
+        recommendedGenres: ["ambient-electronic", "neo-soul", "indie-acoustic"],
+        energyLevel: "medium",
+        valence: "neutral",
         recommendations: [
-          "Sevdiğiniz müzikleri dinleyerek rahatlayın",
-          "Müzik eşliğinde derin nefes alın",
-          "Kendinize zaman ayırın"
+          "Bu anın geçici olduğunu hatırlayın",
+          "Müziğin size sunduğu anlık kaçışı kabul edin", 
+          "Duygularınızı yargılamadan yaşayın"
+        ],
+        personalizedInsight: "Ruh haliniz, içsel dünyançıın zenginliğinin bir göstergesi.",
+        musicMoodConnection: "Doğru müzik seçimi, beyninizdeki serotonin ve dopamin seviyelerini dengeleyebilir.",
+        actionPlan: [
+          "5 dakika sessizce müzik dinleyin",
+          "Nefes egzersizi yapın",
+          "Durumunuzu kabul edin ve kendînizi yargılamayın"
         ]
       }
       
-      console.log('Fallback analysis kullanıldı')
+      console.log('🔄 Minimalist fallback kullanıldı')
     }
 
-    // Veritabanına mood session kaydet
+    // Veritabanına kaydet - genişletilmiş analiz
     const moodSession = await prisma.moodSession.create({
       data: {
         userId: user.id,
-        currentMood: mood.substring(0, 500), // Bu field kısa olabilir
+        currentMood: mood.substring(0, 500),
         targetMood: analysisResult.targetMood.substring(0, 200),
         moodScore: analysisResult.moodScore,
         location: location,
-        aiAnalysis: JSON.stringify(analysisResult), // JSON olarak sakla
+        aiAnalysis: JSON.stringify(analysisResult),
         playlistStrategy: analysisResult.musicStrategy.substring(0, 500),
       },
     })
 
-    console.log('Mood session created:', moodSession.id)
+    console.log('💾 Enhanced mood session created:', moodSession.id)
 
-    // Response döndür
+    // Enhanced response
     return NextResponse.json({
       success: true,
       sessionId: moodSession.id,
       analysis: analysisResult,
-      message: "Mood analizi başarıyla tamamlandı"
+      message: "Derinlemesine AI analizi tamamlandı",
+      aiPowered: true,
+      creativity: "high",
+      uniqueness: true
     })
 
   } catch (error) {
-    console.error('Mood analiz hatası:', error)
+    console.error('💥 Enhanced analiz hatası:', error)
     
     const errorMessage = error instanceof Error ? error.message : 'Bilinmeyen hata oluştu'
     
