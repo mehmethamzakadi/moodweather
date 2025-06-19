@@ -1,36 +1,94 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# MoodWeather - Akıllı Müzik Terapi Uygulaması
 
-## Getting Started
+## Proje Dokümantasyonu
 
-First, run the development server:
+### 📋 Proje Özeti
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+MoodWeather, kullanıcının duygusal durumu ve çevresel faktörleri (hava durumu, saat, mevsim) analiz ederek kişiselleştirilmiş müzik terapi seansları oluşturan web uygulamasıdır.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+---
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 🎯 Ana Hedefler
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### Birincil Hedefler
 
-## Learn More
+- Kullanıcının mevcut ruh halini hedef ruh haline geçirmek
+- Hava durumu ve zaman faktörlerini müzik seçiminde kullanmak
+- AI destekli kişiselleştirilmiş müzik önerileri sunmak
 
-To learn more about Next.js, take a look at the following resources:
+### İkincil Hedefler
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- Kullanıcının müzik dinleme alışkanlıklarını analiz etmek
+- Duygusal değişimleri takip etmek
+- Müzik terapi geçmişini kaydetmek
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+---
 
-## Deploy on Vercel
+## 🔧 Teknik Mimari
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### Frontend
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **Framework:** Next.js 14 (App Router)
+- **Styling:** Tailwind CSS
+- **UI Kütüphane:** Shadcn/ui (isteğe bağlı)
+- **State Management:** React Context API / Zustand
+
+### Backend
+
+- **Platform:** Next.js API Routes (Serverless)
+- **Veritabanı:** SQLite (başlangıç için) / PostgreSQL (production)
+- **ORM:** Prisma
+
+### Üçüncü Taraf API'ler
+
+- **Spotify Web API** (Müzik verileri)
+- **OpenWeatherMap API** (Ücretsiz hava durumu)
+- **Groq API** (Ücretsiz AI - Llama 3.1 modeli)
+
+### Deployment
+
+- **Platform:** Vercel (Ücretsiz tier)
+- **Domain:** Vercel subdomain (.vercel.app)
+
+---
+
+## 📱 Uygulama Özellikleri
+
+### 🌦️ Çevresel Algı Motoru
+
+- **Hava Durumu Entegrasyonu**
+
+  - Anlık sıcaklık, nem, basınç
+  - Hava durumu koşulları (güneşli, yağmurlu, bulutlu)
+  - Görünürlük ve rüzgar hızı
+
+- **Zaman Analizi**
+  - Günün saati (sabah, öğle, akşam, gece)
+  - Mevsim tespiti
+  - Hafta içi/hafta sonu ayrımı
+
+### 🧠 Duygusal Zeka Sistemi
+
+- **Mood Input Yöntemleri**
+
+  - Metin tabanlı mood açıklaması
+  - Emoji seçimi
+  - Önceden tanımlı mood kategorileri
+
+- **AI Mood Analizi**
+  - Kullanıcı metninden duygu çıkarımı
+  - Enerji seviyesi tespiti
+  - Hedef mood belirleme
+
+### 🎶 Müzik Terapi Motoru
+
+- **Spotify Entegrasyonu**
+
+  - Kullanıcının saved tracks analizi
+  - Recently played tracks
+  - Top artists ve genres
+
+- **Playlist Oluşturma**
+  - Mevcut -> Hedef mood geçiş algoritması
+  - Hava durumu uyumlu şarkı seçimi
+  - Tempo ve enerji seviyesi gradasyonu
