@@ -2,12 +2,18 @@
 "use client"
 
 import { useSearchParams } from "next/navigation"
-import { Suspense } from "react"
+import { Suspense, useEffect, useState } from "react"
 
 function ErrorContent() {
   const searchParams = useSearchParams()
   const error = searchParams.get("error")
   const errorDescription = searchParams.get("error_description")
+  const [currentUrl, setCurrentUrl] = useState<string>("")
+
+  // Client-side only URL setting
+  useEffect(() => {
+    setCurrentUrl(window.location.href)
+  }, [])
 
   const getErrorMessage = (error: string | null) => {
     switch (error) {
@@ -48,7 +54,7 @@ function ErrorContent() {
             </p>
           )}
           <p className="text-sm text-red-700">
-            <strong>Current URL:</strong> {window.location.href}
+            <strong>Current URL:</strong> {currentUrl || "Loading..."}
           </p>
         </div>
 

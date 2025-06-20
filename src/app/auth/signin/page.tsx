@@ -23,11 +23,17 @@ export default function SignIn() {
     
     setLoading(true)
     try {
-      console.log('Spotify login başlatılıyor...')
+      console.log('Spotify login başlatılıyor (force mode)...')
+      
+      // Force Spotify yeniden authentication
       const result = await signIn("spotify", { 
         callbackUrl: "/dashboard",
-        redirect: true 
+        redirect: true,
+        // Force parameters
+        prompt: "login",
+        show_dialog: "true"
       })
+      
       console.log('SignIn result:', result)
     } catch (error) {
       console.error("Sign in error:", error)

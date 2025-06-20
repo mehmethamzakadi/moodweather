@@ -1,7 +1,7 @@
 // src/app/mood/results/[sessionId]/page.tsx
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { useSession } from "next-auth/react"
 
@@ -28,13 +28,16 @@ interface MoodSession {
 }
 
 export default function MoodResults({ params }: { params: Promise<{ sessionId: string }> }) {
-  const { data: session, status } = useSession()
+  const { status } = useSession()
   const router = useRouter()
   const [loading, setLoading] = useState(true)
   const [moodSession, setMoodSession] = useState<MoodSession | null>(null)
   const [analysis, setAnalysis] = useState<MoodAnalysis | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [sessionId, setSessionId] = useState<string>("")
+  const [isCreatingPlaylist, setIsCreatingPlaylist] = useState(false)
+  const [playlistCreated, setPlaylistCreated] = useState(false)
+  const [playlistUrl, setPlaylistUrl] = useState<string | null>(null)
 
   useEffect(() => {
     // Params'ı await et
@@ -45,18 +48,7 @@ export default function MoodResults({ params }: { params: Promise<{ sessionId: s
     getSessionId()
   }, [params])
 
-  useEffect(() => {
-    if (status === "unauthenticated") {
-      router.push("/auth/signin")
-      return
-    }
-
-    if (status === "authenticated" && sessionId) {
-      fetchMoodSession()
-    }
-  }, [status, sessionId])
-
-  const fetchMoodSession = async () => {
+  const fetchMoodSession = useCallback(async () => {
     try {
       const response = await fetch(`/api/mood/session/${sessionId}`)
       
@@ -72,7 +64,53 @@ export default function MoodResults({ params }: { params: Promise<{ sessionId: s
     } finally {
       setLoading(false)
     }
+  }, [sessionId])
+
+  useEffect(() => {
+    if (status === "unauthenticated") {
+      router.push("/auth/signin")
+      return
+    }
+
+    if (status === "authenticated" && sessionId) {
+      fetchMoodSession()
+    }
+  }, [status, sessionId, fetchMoodSession, router])
+
+  const createPlaylist = async () => {
+    if (!sessionId || isCreatingPlaylist) return
+
+    setIsCreatingPlaylist(true)
+    try {
+      const response = await fetch('/api/playlist/create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ sessionId }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Playlist oluşturulamadı')
+      }
+
+      const data = await response.json()
+      setPlaylistCreated(true)
+      setPlaylistUrl(data.playlist.spotifyUrl)
+      
+      // Başarı bildirimi
+      alert(`Playlist başarıyla oluşturuldu! "${data.playlist.name}" adlı playlist ${data.playlist.trackCount} şarkı içeriyor.`)
+      
+    } catch (err) {
+      console.error('Playlist oluşturma hatası:', err)
+      alert(err instanceof Error ? err.message : 'Playlist oluşturulurken bir hata oluştu')
+    } finally {
+      setIsCreatingPlaylist(false)
+    }
   }
+
+
 
   const getMoodEmoji = (score: number) => {
     if (score <= 2) return "😔"
@@ -117,7 +155,7 @@ export default function MoodResults({ params }: { params: Promise<{ sessionId: s
             onClick={() => router.push("/dashboard")}
             className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-2 rounded-lg transition-colors"
           >
-            Dashboard'a Dön
+            Dashboard&apos;a Dön
           </button>
         </div>
       </div>
@@ -162,7 +200,7 @@ export default function MoodResults({ params }: { params: Promise<{ sessionId: s
         <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-6 mb-6 border border-white/20">
           <h3 className="text-xl font-semibold text-white mb-3">🎭 Girdiğin Mood</h3>
           <p className="text-white/90 bg-white/10 rounded-lg p-4 italic">
-            "{moodSession.currentMood}"
+            &quot;{moodSession.currentMood}&quot;
           </p>
         </div>
 
@@ -214,22 +252,58 @@ export default function MoodResults({ params }: { params: Promise<{ sessionId: s
 
         {/* Action Buttons */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <button className="bg-gradient-to-r from-green-500 to-blue-600 hover:from-green-600 hover:to-blue-700 text-white font-semibold py-4 px-6 rounded-xl transition-all duration-200 transform hover:scale-105 flex items-center justify-center space-x-2">
-            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.84-.179-.84-.66 0-.479.359-.78.719-.84 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.299 1.02v.061zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.42 1.56-.299.421-1.02.599-1.559.3z"/>
-            </svg>
-            <span>Spotify Playlist Oluştur</span>
+          <button 
+            onClick={createPlaylist}
+            disabled={isCreatingPlaylist || playlistCreated}
+            className="bg-gradient-to-r from-green-500 to-blue-600 hover:from-green-600 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-4 px-6 rounded-xl transition-all duration-200 transform hover:scale-105 disabled:hover:scale-100 flex items-center justify-center space-x-2"
+          >
+            {isCreatingPlaylist ? (
+              <>
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                <span>Playlist Oluşturuluyor...</span>
+              </>
+            ) : playlistCreated ? (
+              <>
+                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                </svg>
+                <span>Playlist Oluşturuldu!</span>
+              </>
+            ) : (
+              <>
+                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.84-.179-.84-.66 0-.479.359-.78.719-.84 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.299 1.02v.061zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.42 1.56-.299.421-1.02.599-1.559.3z"/>
+                </svg>
+                <span>Spotify Playlist Oluştur</span>
+              </>
+            )}
           </button>
 
-          <button 
-            onClick={() => router.push("/dashboard")}
-            className="bg-gradient-to-r from-purple-500 to-pink-600 hover:from-purple-600 hover:to-pink-700 text-white font-semibold py-4 px-6 rounded-xl transition-all duration-200 transform hover:scale-105 flex items-center justify-center space-x-2"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-            <span>Yeni Analiz Yap</span>
-          </button>
+          {playlistCreated && playlistUrl && (
+            <a 
+              href={playlistUrl} 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white font-semibold py-4 px-6 rounded-xl transition-all duration-200 transform hover:scale-105 flex items-center justify-center space-x-2"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              </svg>
+              <span>Spotify'da Aç</span>
+            </a>
+          )}
+
+          {!playlistCreated && (
+            <button 
+              onClick={() => router.push("/dashboard")}
+              className="bg-gradient-to-r from-purple-500 to-pink-600 hover:from-purple-600 hover:to-pink-700 text-white font-semibold py-4 px-6 rounded-xl transition-all duration-200 transform hover:scale-105 flex items-center justify-center space-x-2"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              <span>Yeni Analiz Yap</span>
+            </button>
+          )}
         </div>
       </main>
     </div>

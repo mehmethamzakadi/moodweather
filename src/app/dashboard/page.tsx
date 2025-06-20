@@ -1,22 +1,34 @@
 // src/app/dashboard/page.tsx
 "use client"
 
-import { useSession, signOut } from "next-auth/react"
+import { useSession } from "next-auth/react"
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
+import Image from "next/image"
 
 export default function Dashboard() {
   const { data: session, status } = useSession()
   const router = useRouter()
   const [moodInput, setMoodInput] = useState("")
   const [isAnalyzing, setIsAnalyzing] = useState(false)
-  const [lastAnalysis, setLastAnalysis] = useState<any>(null)
+  const [lastAnalysis, setLastAnalysis] = useState<{
+    sessionId: string;
+    analysis: {
+      moodAnalysis: string;
+      targetMood: string;
+      moodScore: number;
+    };
+  } | null>(null)
 
   useEffect(() => {
+    console.log('Dashboard - Session status:', status)
+    console.log('Dashboard - Session data:', session)
+    
     if (status === "unauthenticated") {
+      console.log('Kullanıcı unauthenticated, signin\'e yönlendiriliyor...')
       router.push("/auth/signin")
     }
-  }, [status, router])
+  }, [status, router, session])
 
   const handleMoodSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -41,6 +53,13 @@ export default function Dashboard() {
 
       const result = await response.json()
       setLastAnalysis(result)
+      
+      // Debug için lastAnalysis state'ini logla
+      if (lastAnalysis) {
+        console.log('Previous analysis:', lastAnalysis)
+      }
+      console.log('New analysis completed:', result)
+      
       setMoodInput("")
       
       // Başarılı analiz sonrası results sayfasına yönlendir
@@ -89,9 +108,11 @@ export default function Dashboard() {
                 <p className="font-semibold">{session.user?.name || session.user?.email}</p>
               </div>
               {session.user?.image && (
-                <img 
+                <Image 
                   src={session.user.image} 
                   alt="Profile" 
+                  width={40}
+                  height={40}
                   className="w-10 h-10 rounded-full border-2 border-white/30"
                 />
               )}

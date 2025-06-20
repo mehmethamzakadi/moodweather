@@ -1,11 +1,10 @@
-// src/lib/auth.ts
+// src/lib/auth.ts - NextAuth v4 Pure JWT Configuration
 import { NextAuthOptions } from "next-auth"
-import SpotifyProvider from "next-auth/providers/spotify"
-import { PrismaAdapter } from "@auth/prisma-adapter"
-import { prisma } from "@/lib/prisma"
 import { JWT } from "next-auth/jwt"
+import SpotifyProvider from "next-auth/providers/spotify"
 
-// Spotify API scopes - hangi izinlere ihtiyacımız var
+
+// Spotify API scopes
 const scopes = [
   "user-read-email",
   "user-read-private", 
@@ -18,8 +17,7 @@ const scopes = [
 ].join(" ")
 
 export const authOptions: NextAuthOptions = {
-  adapter: PrismaAdapter(prisma),
-  debug: process.env.NODE_ENV === "development",
+
   providers: [
     SpotifyProvider({
       clientId: process.env.SPOTIFY_CLIENT_ID!,
@@ -27,13 +25,14 @@ export const authOptions: NextAuthOptions = {
       authorization: {
         params: {
           scope: scopes,
-          // show_dialog kaldırıldı - cookie sorunlarına sebep olabilir
+          show_dialog: "true", // Force Spotify login dialog
+          prompt: "login" // Force re-authentication
         },
       },
     }),
   ],
   callbacks: {
-    async jwt({ token, account, user }) {
+    async jwt({ token, account, user }): Promise<JWT> {
       // İlk giriş sırasında Spotify bilgilerini kaydet
       if (account && user) {
         return {
@@ -42,7 +41,11 @@ export const authOptions: NextAuthOptions = {
           refreshToken: account.refresh_token,
           accessTokenExpires: account.expires_at! * 1000,
           spotifyId: account.providerAccountId,
-        }
+          userId: user.id,
+          email: user.email,
+          name: user.name,
+          image: user.image
+        } as JWT
       }
 
       // Token'ın süresi dolmamışsa mevcut token'ı döndür
@@ -55,20 +58,31 @@ export const authOptions: NextAuthOptions = {
     },
     async session({ session, token }) {
       // Session'a token bilgilerini ekle
-      session.accessToken = token.accessToken as string
-      session.spotifyId = token.spotifyId as string
-      session.error = token.error as string
+      const extendedSession = session as typeof session & {
+        accessToken?: string;
+        spotifyId?: string;
+        error?: string;
+      }
+      
+      if (token.accessToken) {
+        extendedSession.accessToken = token.accessToken as string
+      }
+      if (token.spotifyId) {
+        extendedSession.spotifyId = token.spotifyId as string
+      }
+      if (token.error) {
+        extendedSession.error = token.error as string
+      }
+      
+      // User bilgilerini token'dan al
+      if (session.user) {
+        session.user.id = token.userId as string
+        session.user.email = token.email as string
+        session.user.name = token.name as string
+        session.user.image = token.image as string
+      }
 
-      return session
-    },
-  },
-  events: {
-    async signOut(message) {
-      console.log('User signed out:', message)
-      // Burada ek temizlik işlemleri yapabilirsin (isteğe bağlı)
-    },
-    async signIn(message) {
-      console.log('User signed in:', message)
+      return extendedSession
     },
   },
   pages: {
@@ -80,46 +94,21 @@ export const authOptions: NextAuthOptions = {
     strategy: "jwt",
     maxAge: 24 * 60 * 60, // 24 saat
   },
-  cookies: {
-    state: {
-      name: "next-auth.state",
-      options: {
-        httpOnly: true,
-        sameSite: "lax",
-        path: "/",
-        secure: false, // HTTP için false
-        maxAge: 900, // 15 dakika
-        domain: undefined, // Subdomain sorunlarını önler
-      },
-    },
-    sessionToken: {
-      name: "next-auth.session-token",
-      options: {
-        httpOnly: true,
-        sameSite: "lax",
-        path: "/",
-        secure: false,
-        maxAge: 24 * 60 * 60, // 24 saat
-        domain: undefined,
-      },
-    },
-    callbackUrl: {
-      name: "next-auth.callback-url",
-      options: {
-        httpOnly: true,
-        sameSite: "lax",
-        path: "/",
-        secure: false,
-        maxAge: 900,
-        domain: undefined,
-      },
-    },
-  },
+  events: {
+    async signOut() {
+      console.log('NextAuth signOut event triggered')
+    }
+  }
 }
 
 // Spotify access token'ını yenileme fonksiyonu
-async function refreshAccessToken(token: any) {
+async function refreshAccessToken(token: JWT): Promise<JWT> {
   try {
+    // refreshToken var mı kontrol et
+    if (!token.refreshToken) {
+      throw new Error("No refresh token available")
+    }
+
     const url = "https://accounts.spotify.com/api/token"
 
     const response = await fetch(url, {
@@ -147,13 +136,13 @@ async function refreshAccessToken(token: any) {
       accessToken: refreshedTokens.access_token,
       accessTokenExpires: Date.now() + refreshedTokens.expires_in * 1000,
       refreshToken: refreshedTokens.refresh_token ?? token.refreshToken,
-    }
+    } as JWT
   } catch (error) {
     console.error("Error refreshing access token:", error)
 
     return {
       ...token,
       error: "RefreshAccessTokenError",
-    }
+    } as JWT
   }
-}//s
+}

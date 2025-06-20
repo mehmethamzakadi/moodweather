@@ -16,10 +16,14 @@ export default function HomePage() {
   const weathers = ["☀️ Güneşli", "🌧️ Yağmurlu", "❄️ Karlı", "⛅ Bulutlu", "🌈 Renkli", "🌙 Gecelik"]
 
   useEffect(() => {
-    if (session) {
+    console.log('Session status:', status)
+    console.log('Session data:', session)
+    
+    if (status === "authenticated" && session) {
+      console.log('Kullanıcı authenticated, dashboard\'a yönlendiriliyor...')
       router.push("/dashboard")
     }
-  }, [session, router])
+  }, [session, status, router])
 
   useEffect(() => {
     const moodInterval = setInterval(() => {
@@ -34,13 +38,20 @@ export default function HomePage() {
       clearInterval(moodInterval)
       clearInterval(weatherInterval)
     }
-  }, [])
+  }, [moods.length, weathers.length])
 
   const handleSpotifyLogin = () => {
-    if (status === "loading") return // Zaten loading ise işlem yapma
+    if (status === "loading") return
     
-    console.log('Spotify login başlatılıyor (anasayfa)...')
-    signIn("spotify", { callbackUrl: "/dashboard" })
+    console.log('Spotify login başlatılıyor (force auth)...')
+    
+    // Force authorization - Spotify'ı session reuse etmesini engelle
+    signIn("spotify", { 
+      callbackUrl: "/dashboard",
+      // Force yeniden authorization
+      prompt: "login",
+      show_dialog: "true"
+    })
   }
 
   if (status === "loading") {
@@ -129,7 +140,7 @@ export default function HomePage() {
               </div>
               <h3 className="text-lg font-semibold text-white mb-2">Hava Durumu</h3>
               <div className="bg-white/10 rounded-xl p-4 mb-2 border border-white/20">
-                <p className="text-blue-200 text-sm">İstanbul'da:</p>
+                <p className="text-blue-200 text-sm">İstanbul&apos;da:</p>
                 <p className="text-white text-lg font-semibold transition-all duration-500">
                   {weathers[currentWeatherIndex]}
                 </p>

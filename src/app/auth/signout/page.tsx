@@ -13,31 +13,135 @@ export default function SignOut() {
   const handleSignOut = async () => {
     setIsSigningOut(true)
     try {
-      // Tüm cookie'leri temizle
-      document.cookie.split(";").forEach((c) => {
-        const eqPos = c.indexOf("=")
-        const name = eqPos > -1 ? c.substr(0, eqPos) : c
-        document.cookie = name + "=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/"
-        document.cookie = name + "=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=" + window.location.hostname
-      })
-
-      // NextAuth signOut
+      console.log('🔴 AGRESİF SIGN OUT BAŞLATILIYOR...')
+      
+      // 1. NextAuth signOut - redirect: false
+      console.log('1. NextAuth signOut çağrılıyor...')
       await signOut({
         redirect: false,
         callbackUrl: "/"
       })
-
-      // Local storage temizle (varsa)
-      if (typeof window !== 'undefined') {
-        localStorage.clear()
-        sessionStorage.clear()
+      console.log('✅ NextAuth signOut tamamlandı')
+      
+      // 1.5. Server-side force logout
+      console.log('1.5. Server-side session temizleniyor...')
+      try {
+        await fetch('/api/auth/force-logout', {
+          method: 'POST'
+        })
+        console.log('✅ Server-side session temizlendi')
+      } catch (e) {
+        console.log('⚠️ Server-side temizleme hatası:', e)
       }
-
-      // Ana sayfaya yönlendir
-      window.location.href = "/"
+      
+      // 2. Browser storage temizliği
+      if (typeof window !== 'undefined') {
+        console.log('2. Storage temizleme başlatılıyor...')
+        
+        try {
+          localStorage.clear()
+          sessionStorage.clear()
+          console.log('✅ Storage temizlendi')
+        } catch (e) {
+          console.log('❌ Storage temizleme hatası:', e)
+        }
+        
+        // 3. NextAuth cookie'lerini özel olarak hedefle
+        const nextAuthCookies = [
+          'next-auth.session-token',
+          'next-auth.csrf-token', 
+          'next-auth.callback-url',
+          'next-auth.state',
+          '__Secure-next-auth.session-token',
+          '__Host-next-auth.csrf-token'
+        ]
+        
+        console.log('3. NextAuth cookie\'leri temizleniyor...')
+        nextAuthCookies.forEach(cookieName => {
+          // Farklı path ve domain kombinasyonları
+          const deleteConfigs = [
+            `${cookieName}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/;`,
+            `${cookieName}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; domain=localhost;`,
+            `${cookieName}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; domain=.localhost;`,
+            `${cookieName}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/api/auth;`,
+            `${cookieName}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/api/auth; domain=localhost;`,
+            `${cookieName}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; secure;`,
+            `${cookieName}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; SameSite=Lax;`,
+            `${cookieName}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; secure; SameSite=Lax;`
+          ]
+          
+          deleteConfigs.forEach(config => {
+            document.cookie = config
+          })
+          
+          console.log(`✅ ${cookieName} temizlendi`)
+        })
+        
+        // 4. Tüm diğer cookie'leri de temizle
+        console.log('4. Tüm cookie\'ler kontrol ediliyor...')
+        const allCookies = document.cookie.split(';')
+        
+        allCookies.forEach(cookie => {
+          const cookieName = cookie.split('=')[0].trim()
+          if (cookieName) {
+            const deleteConfigs = [
+              `${cookieName}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/;`,
+              `${cookieName}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; domain=localhost;`,
+              `${cookieName}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; domain=.localhost;`,
+              `${cookieName}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/api/auth;`
+            ]
+            
+            deleteConfigs.forEach(config => {
+              document.cookie = config
+            })
+          }
+        })
+        
+        console.log('✅ Tüm cookie\'ler temizlendi')
+        
+        // 5. Cookie'lerin gerçekten temizlendiğini kontrol et
+        setTimeout(() => {
+          const remainingCookies = document.cookie
+          console.log('Kalan cookie\'ler:', remainingCookies)
+          
+          if (remainingCookies.includes('next-auth')) {
+            console.log('⚠️ NextAuth cookie\'leri hala var!')
+          } else {
+            console.log('✅ NextAuth cookie\'leri tamamen temizlendi')
+          }
+        }, 100)
+      }
+      
+      // 6. Spotify session'ı da sonlandır
+      console.log('6. Spotify session sonlandırılıyor...')
+      try {
+        // Spotify logout endpoint'ıne istek gönder
+        const spotifyLogoutUrl = 'https://accounts.spotify.com/logout'
+        
+        // Yeni tab'da açıp kapat (session sonlandırma için)
+        const logoutWindow = window.open(spotifyLogoutUrl, '_blank', 'width=1,height=1')
+        setTimeout(() => {
+          if (logoutWindow) {
+            logoutWindow.close()
+          }
+        }, 1000)
+        
+        console.log('✅ Spotify logout request gönderildi')
+      } catch (e) {
+        console.log('⚠️ Spotify logout isteği başarısız:', e)
+      }
+      
+      // 7. Sayfayı tamamen yenile (cache bypass)
+      console.log('5. Sayfa yenileniyor...')
+      setTimeout(() => {
+        window.location.href = "/?t=" + Date.now() // Timestamp ile cache bypass
+      }, 200)
+      
     } catch (error) {
-      console.error('SignOut error:', error)
+      console.error('❌ SignOut error:', error)
       setIsSigningOut(false)
+      // Hata durumunda da sayfayı yenile
+      window.location.href = "/?error=signout"
     }
   }
 
@@ -63,7 +167,7 @@ export default function SignOut() {
           <>
             <p className="text-gray-600 mb-6">
               Merhaba <strong>{session.user?.name || session.user?.email}</strong>, 
-              MoodWeather'dan çıkış yapmak istediğinizden emin misiniz?
+              MoodWeather&apos;dan çıkış yapmak istediğinizden emin misiniz?
             </p>
 
             <div className="space-y-3">
