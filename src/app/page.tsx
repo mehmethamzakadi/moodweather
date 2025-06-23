@@ -43,14 +43,13 @@ export default function HomePage() {
   const handleSpotifyLogin = () => {
     if (status === "loading") return
     
-    console.log('Spotify login başlatılıyor (force auth)...')
+    console.log('Spotify login başlatılıyor (127.0.0.1 mode)...')
     
-    // Force authorization - Spotify'ı session reuse etmesini engelle
+    // Complete refresh - önceki session'ı temizle
     signIn("spotify", { 
-      callbackUrl: "/dashboard",
+      callbackUrl: "http://127.0.0.1:3000/dashboard",
       // Force yeniden authorization
-      prompt: "login",
-      show_dialog: "true"
+      redirect: true
     })
   }
 

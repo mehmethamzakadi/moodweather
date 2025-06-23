@@ -1,6 +1,7 @@
 // src/app/api/playlist/create/route.ts
 import { NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
+import type { Session } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { createSpotifyClient, SpotifyAPI } from "@/lib/spotify/api"
@@ -10,7 +11,9 @@ export async function POST(request: NextRequest) {
   try {
     // Session kontrol et
     const session = await getServerSession(authOptions)
-    if (!session?.user?.email || !(session as any).accessToken) {
+    const extendedSession = session as Session & { accessToken?: string }
+    
+    if (!session?.user?.email || !extendedSession.accessToken) {
       return NextResponse.json(
         { error: "Spotify giriş yapmış kullanıcı gerekli" },
         { status: 401 }
@@ -18,7 +21,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Request body'yi parse et
-    const { sessionId } = await request.json()
+    const { sessionId, includeTurkish = false, isPlaylistPrivate = true } = await request.json()
 
     if (!sessionId) {
       return NextResponse.json(
@@ -64,68 +67,86 @@ export async function POST(request: NextRequest) {
     })
 
     // Spotify API client oluştur
-    const spotifyClient = createSpotifyClient(session as any)
+    const spotifyClient = createSpotifyClient({ accessToken: extendedSession.accessToken })
 
-    // Kullanıcı profilini al
-    const userProfile = await spotifyClient.getUserProfile()
-    console.log('👤 Spotify kullanıcısı:', userProfile.display_name, userProfile.id)
+    // ACCESS TOKEN DEBUG
+    console.log('🔑 Access token ilk 30 karakter:', extendedSession.accessToken?.substring(0, 30))
+    console.log('🔑 Access token uzunluğu:', extendedSession.accessToken?.length)
+    
+    // Test 1: Basic API Call (Me endpoint)
+    let userProfile: { id: string; display_name: string }
+    try {
+      userProfile = await spotifyClient.getUserProfile()
+      console.log('✅ Spotify getUserProfile() başarılı:', userProfile.display_name, userProfile.id)
+      
+      // Token geçerli, scopes'ı kontrol edelim
+      console.log('🔒 User profile scopes test: PASSED')
+    } catch (profileError) {
+      console.error('❌ getUserProfile() başarısız:', profileError)
+      return NextResponse.json(
+        { error: "Spotify access token geçersiz. Lütfen çıkış yapıp tekrar giriş yapın." },
+        { status: 401 }
+      )
+    }
 
     // Audio features hesapla
     const audioFeatures = SpotifyAPI.calculateAudioFeatures(analysis)
     console.log('🎚️ Audio features:', audioFeatures)
 
-    // Şarkı önerileri al
-    const tracks: SpotifyTrack[] = await spotifyClient.getRecommendations({
-      genres: analysis.recommendedGenres || ['pop', 'chill'],
-      energy: audioFeatures.energy,
-      valence: audioFeatures.valence,
-      tempo: audioFeatures.tempo,
-      limit: 25 // Biraz fazla al, sonra filtrele
-    })
-
-    console.log(`🔍 ${tracks.length} şarkı bulundu`)
-
-    if (tracks.length === 0) {
-      console.log('❌ Şarkı bulunamadı, fallback genre\'larla deneniyor...')
-      
-      // Fallback genres ile tekrar dene
-      const fallbackTracks = await spotifyClient.getRecommendations({
-        genres: ['pop', 'indie', 'chill'],
-        energy: audioFeatures.energy,
-        valence: audioFeatures.valence,
-        limit: 20
+    // Şarkı önerileri al - Gelişmiş algoritma ile
+    let tracks: SpotifyTrack[] = []
+    
+    console.log('🎵 Gelişmiş playlist algoritması başlatılıyor...', { includeTurkish })
+    
+    try {
+      // Çeşitli arama stratejileri ile şarkı topla
+      tracks = await spotifyClient.searchTracksAdvanced({
+        genres: analysis.recommendedGenres,
+        audioFeatures,
+        includeTurkish,
+        limit: 50 // Daha fazla şarkı al, sonra filtrele
       })
-
-      if (fallbackTracks.length === 0) {
-        return NextResponse.json(
-          { error: "Bu ruh haline uygun şarkı bulunamadı" },
-          { status: 404 }
-        )
-      }
-
-      tracks.push(...fallbackTracks)
+      
+      console.log(`🔍 Toplam ${tracks.length} şarkı bulundu`)
+      
+    } catch (searchError) {
+      console.error('🚫 Search API başarısız:', searchError)
+      return NextResponse.json(
+        { error: "Spotify'dan şarkı alınamadı. Lütfen daha sonra tekrar deneyin." },
+        { status: 503 }
+      )
     }
 
-    // Şarkıları popülerlik ve çeşitliliğe göre filtrele
-    const selectedTracks = tracks
-      .filter(track => track.popularity > 30) // Minimum popülerlik
-      .sort((a, b) => b.popularity - a.popularity) // Popülerliğe göre sırala
-      .slice(0, 20) // İlk 20 şarkıyı al
+    if (tracks.length === 0) {
+      return NextResponse.json(
+        { error: "Bu ruh haline uygun şarkı bulunamadı" },
+        { status: 404 }
+      )
+    }
 
-    console.log(`✨ ${selectedTracks.length} şarkı seçildi`)
+    // Gelişmiş şarkı filtreleme ve çeşitlilik algoritması
+    const selectedTracks = SpotifyAPI.filterAndDiversifyTracks(tracks, {
+      maxPerArtist: 2, // Aynı sanatçıdan maksimum 2 şarkı
+      minPopularity: 25, // Minimum popülerlik
+      targetCount: 20, // Hedef şarkı sayısı
+      includeTurkish
+    })
+
+    console.log(`✨ ${selectedTracks.length} şarkı seçildi (${tracks.length} adetten)`)
 
     // Playlist adı ve açıklaması oluştur
     const playlistName = analysis.playlistTheme || `${moodSession.current_mood} Playlist`
     const playlistDescription = `${analysis.moodAnalysis.substring(0, 200)}... (MoodWeather AI tarafından oluşturuldu)`
 
-    // Spotify'da playlist oluştur
+    // Spotify'da playlist oluştur - Kullanıcı tercihine göre gizlilik
     const playlist = await spotifyClient.createPlaylist(
       userProfile.id,
       playlistName,
-      playlistDescription
+      playlistDescription,
+      isPlaylistPrivate // Kullanıcı tercihi
     )
 
-    console.log('📝 Playlist oluşturuldu:', playlist.name, playlist.id)
+    console.log('📝 Playlist oluşturuldu:', playlist.name, playlist.id, `(${isPlaylistPrivate ? '🔒 Private' : '🌍 Public'})`)
 
     // Şarkıları playlist'e ekle
     const trackUris = selectedTracks.map(track => track.uri)
@@ -135,10 +156,9 @@ export async function POST(request: NextRequest) {
 
     // Playlist bilgilerini hesapla
     const totalDuration = selectedTracks.reduce((sum, track) => sum + track.duration_ms, 0)
-    const averagePopularity = selectedTracks.reduce((sum, track) => sum + track.popularity, 0) / selectedTracks.length
 
     // Supabase'e playlist kaydını ekle
-    const { data: playlistHistory, error: insertError } = await supabase
+    const { error: insertError } = await supabase
       .from('playlist_history')
       .insert({
         user_id: moodSession.user_id,

@@ -23,6 +23,8 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  // Server external packages (moved from experimental in Next.js 15)
+  serverExternalPackages: ["@node-rs/argon2"],
 };
 
 export default nextConfig;

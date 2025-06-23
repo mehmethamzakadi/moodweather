@@ -4,16 +4,21 @@ import { JWT } from "next-auth/jwt"
 import SpotifyProvider from "next-auth/providers/spotify"
 
 
-// Spotify API scopes
+// Spotify API scopes - Genişletilmiş
 const scopes = [
   "user-read-email",
   "user-read-private", 
   "user-read-recently-played",
   "user-top-read",
   "user-library-read",
+  "user-library-modify",
   "playlist-modify-public",
   "playlist-modify-private",
-  "playlist-read-private"
+  "playlist-read-private",
+  "playlist-read-collaborative",
+  "user-read-playback-state",
+  "user-modify-playback-state",
+  "user-read-currently-playing"
 ].join(" ")
 
 export const authOptions: NextAuthOptions = {
@@ -31,6 +36,55 @@ export const authOptions: NextAuthOptions = {
       },
     }),
   ],
+  // Cookie ayarları - 127.0.0.1 için
+  cookies: {
+    sessionToken: {
+      name: `next-auth.session-token`,
+      options: {
+        httpOnly: true,
+        sameSite: 'lax',
+        path: '/',
+        secure: false, // HTTP için false
+      },
+    },
+    callbackUrl: {
+      name: `next-auth.callback-url`,
+      options: {
+        sameSite: 'lax',
+        path: '/',
+        secure: false,
+      },
+    },
+    csrfToken: {
+      name: `next-auth.csrf-token`,
+      options: {
+        httpOnly: true,
+        sameSite: 'lax',
+        path: '/',
+        secure: false,
+      },
+    },
+    pkceCodeVerifier: {
+      name: `next-auth.pkce.code_verifier`,
+      options: {
+        httpOnly: true,
+        sameSite: 'lax',
+        path: '/',
+        secure: false,
+        maxAge: 60 * 15, // 15 minutes
+      },
+    },
+    state: {
+      name: `next-auth.state`,
+      options: {
+        httpOnly: true,
+        sameSite: 'lax',
+        path: '/',
+        secure: false,
+        maxAge: 60 * 15, // 15 minutes
+      },
+    },
+  },
   callbacks: {
     async jwt({ token, account, user }): Promise<JWT> {
       // İlk giriş sırasında Spotify bilgilerini kaydet

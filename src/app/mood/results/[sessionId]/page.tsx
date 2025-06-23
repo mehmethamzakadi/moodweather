@@ -4,6 +4,7 @@
 import { useEffect, useState, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { useSession } from "next-auth/react"
+import Image from "next/image"
 
 interface MoodAnalysis {
   moodAnalysis: string
@@ -25,6 +26,8 @@ interface MoodSession {
   aiAnalysis: string
   playlistStrategy: string
   sessionDate: string
+  includeTurkish: boolean
+  isPlaylistPrivate: boolean
 }
 
 export default function MoodResults({ params }: { params: Promise<{ sessionId: string }> }) {
@@ -37,7 +40,19 @@ export default function MoodResults({ params }: { params: Promise<{ sessionId: s
   const [sessionId, setSessionId] = useState<string>("")
   const [isCreatingPlaylist, setIsCreatingPlaylist] = useState(false)
   const [playlistCreated, setPlaylistCreated] = useState(false)
-  const [playlistUrl, setPlaylistUrl] = useState<string | null>(null)
+  const [playlistData, setPlaylistData] = useState<{
+    tracks: Array<{
+      id: string;
+      name: string;
+      artist: string;
+      album: string;
+      image: string;
+      spotifyUrl: string;
+      duration: number;
+    }>;
+    spotifyUrl: string;
+    name: string;
+  } | null>(null)
 
   useEffect(() => {
     // Params'ı await et
@@ -82,12 +97,22 @@ export default function MoodResults({ params }: { params: Promise<{ sessionId: s
 
     setIsCreatingPlaylist(true)
     try {
+      // Session'dan kullanıcı tercihlerini al
+      const includeTurkish = moodSession?.includeTurkish || false
+      const isPlaylistPrivate = moodSession?.isPlaylistPrivate !== false // varsayılan true
+      
+      console.log('🎧 Playlist oluşturuluyor...', { sessionId, includeTurkish, isPlaylistPrivate })
+      
       const response = await fetch('/api/playlist/create', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ sessionId }),
+        body: JSON.stringify({ 
+          sessionId,
+          includeTurkish,
+          isPlaylistPrivate
+        }),
       })
 
       if (!response.ok) {
@@ -97,10 +122,15 @@ export default function MoodResults({ params }: { params: Promise<{ sessionId: s
 
       const data = await response.json()
       setPlaylistCreated(true)
-      setPlaylistUrl(data.playlist.spotifyUrl)
+      setPlaylistData({
+        tracks: data.playlist.tracks,
+        spotifyUrl: data.playlist.spotifyUrl,
+        name: data.playlist.name
+      })
       
-      // Başarı bildirimi
-      alert(`Playlist başarıyla oluşturuldu! "${data.playlist.name}" adlı playlist ${data.playlist.trackCount} şarkı içeriyor.`)
+      // Başarı bildirimi - gizlilik durumuna göre
+      const privacyText = isPlaylistPrivate ? '🔒 gizli' : '🌍 herkese açık'
+      alert(`✨ Playlist başarıyla oluşturuldu! "${data.playlist.name}" adlı ${privacyText} playlist ${data.playlist.trackCount} şarkı içeriyor.`)
       
     } catch (err) {
       console.error('Playlist oluşturma hatası:', err)
@@ -251,7 +281,7 @@ export default function MoodResults({ params }: { params: Promise<{ sessionId: s
         </div>
 
         {/* Action Buttons */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
           <button 
             onClick={createPlaylist}
             disabled={isCreatingPlaylist || playlistCreated}
@@ -279,9 +309,9 @@ export default function MoodResults({ params }: { params: Promise<{ sessionId: s
             )}
           </button>
 
-          {playlistCreated && playlistUrl && (
+          {playlistCreated && playlistData && (
             <a 
-              href={playlistUrl} 
+              href={playlistData.spotifyUrl} 
               target="_blank" 
               rel="noopener noreferrer"
               className="bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white font-semibold py-4 px-6 rounded-xl transition-all duration-200 transform hover:scale-105 flex items-center justify-center space-x-2"
@@ -289,7 +319,7 @@ export default function MoodResults({ params }: { params: Promise<{ sessionId: s
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
               </svg>
-              <span>Spotify'da Aç</span>
+              <span>Spotify&apos;da Aç</span>
             </a>
           )}
 
@@ -305,6 +335,77 @@ export default function MoodResults({ params }: { params: Promise<{ sessionId: s
             </button>
           )}
         </div>
+
+        {/* Playlist Tracks Display */}
+        {playlistCreated && playlistData && (
+          <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-6 border border-white/20">
+            <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+              <h3 className="text-2xl font-semibold text-white flex items-center space-x-2">
+                <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.84-.179-.84-.66 0-.479.359-.78.719-.84 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.299 1.02v.061zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.42 1.56-.299.421-1.02.599-1.559.3z"/>
+                </svg>
+                <span>{playlistData.name}</span>
+              </h3>
+              <div className="flex items-center space-x-2">
+                <span className="bg-green-500/20 text-green-300 px-3 py-1 rounded-full text-sm font-medium">
+                  {playlistData.tracks.length} şarkı
+                </span>
+                <span className="bg-purple-500/20 text-purple-300 px-3 py-1 rounded-full text-sm font-medium flex items-center space-x-1">
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/>
+                  </svg>
+                  <span>Özel</span>
+                </span>
+              </div>
+            </div>
+            
+            <div className="space-y-3 max-h-96 overflow-y-auto">
+              {playlistData.tracks.map((track, index) => (
+                <div key={track.id} className="bg-white/5 rounded-lg p-4 hover:bg-white/10 transition-colors border border-white/10">
+                  <div className="flex items-center space-x-4">
+                    <div className="flex-shrink-0 w-8 h-8 bg-white/20 rounded-full flex items-center justify-center">
+                      <span className="text-white text-sm font-bold">{index + 1}</span>
+                    </div>
+                    
+                    {track.image && (
+                      <Image 
+                        src={track.image} 
+                        alt={track.album}
+                        width={48}
+                        height={48}
+                        className="w-12 h-12 rounded-md object-cover"
+                        unoptimized // Spotify resimlerini optimize etme
+                      />
+                    )}
+                    
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-white font-medium truncate">{track.name}</h4>
+                      <p className="text-white/70 text-sm truncate">{track.artist}</p>
+                      <p className="text-white/50 text-xs truncate">{track.album}</p>
+                    </div>
+                    
+                    <div className="flex items-center space-x-2">
+                      <span className="text-white/60 text-sm">
+                        {Math.floor(track.duration / 60000)}:{String(Math.floor((track.duration % 60000) / 1000)).padStart(2, '0')}
+                      </span>
+                      <a 
+                        href={track.spotifyUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-2 bg-green-500/20 hover:bg-green-500/40 rounded-full transition-colors"
+                        title="Spotify'da Aç"
+                      >
+                        <svg className="w-4 h-4 text-green-400" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.84-.179-.84-.66 0-.479.359-.78.719-.84 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.299 1.02v.061zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.42 1.56-.299.421-1.02.599-1.559.3z"/>
+                        </svg>
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </main>
     </div>
   )

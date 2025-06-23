@@ -19,6 +19,8 @@ export default function Dashboard() {
       moodScore: number;
     };
   } | null>(null)
+  const [includeTurkish, setIncludeTurkish] = useState(false)
+  const [isPlaylistPrivate, setIsPlaylistPrivate] = useState(true) // Varsayılan: gizli
 
   useEffect(() => {
     console.log('Dashboard - Session status:', status)
@@ -43,7 +45,9 @@ export default function Dashboard() {
         },
         body: JSON.stringify({
           mood: moodInput.trim(),
-          location: "Istanbul" // Şimdilik sabit, sonra GPS ekleriz
+          location: "Istanbul", // Şimdilik sabit, sonra GPS ekleriz
+          includeTurkish: includeTurkish, // Türkçe filtresi
+          isPlaylistPrivate: isPlaylistPrivate // Gizlilik tercihi
         }),
       })
 
@@ -183,6 +187,45 @@ export default function Dashboard() {
               </div>
             </div>
           </form>
+
+          {/* Türkçe ve Gizlilik Filtreleri */}
+          <div className="flex flex-col sm:flex-row gap-6 pt-6 border-t border-white/20">
+            {/* Türkçe Filtresi */}
+            <div className="flex items-center justify-center space-x-3">
+              <label className="flex items-center space-x-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={includeTurkish}
+                  onChange={(e) => setIncludeTurkish(e.target.checked)}
+                  className="w-4 h-4 text-blue-600 bg-white/10 border-white/30 rounded focus:ring-blue-500 focus:ring-2"
+                />
+                <span className="text-white/80 text-sm">
+                  Türkçe şarkılar da olsun
+                </span>
+              </label>
+              <div className="text-white/60 text-xs">
+                {includeTurkish ? '🇹🇷 Türkçe + Yabancı' : '🌍 Sadece Yabancı'}
+              </div>
+            </div>
+            
+            {/* Gizlilik Filtresi */}
+            <div className="flex items-center justify-center space-x-3">
+              <label className="flex items-center space-x-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={isPlaylistPrivate}
+                  onChange={(e) => setIsPlaylistPrivate(e.target.checked)}
+                  className="w-4 h-4 text-purple-600 bg-white/10 border-white/30 rounded focus:ring-purple-500 focus:ring-2"
+                />
+                <span className="text-white/80 text-sm">
+                  Playlist&apos;i gizli yap
+                </span>
+              </label>
+              <div className="text-white/60 text-xs">
+                {isPlaylistPrivate ? '🔒 Sadece Ben' : '🌍 Herkese Açık'}
+              </div>
+            </div>
+          </div>
 
           {/* Quick Mood Buttons */}
           <div className="mt-8 pt-6 border-t border-white/20">

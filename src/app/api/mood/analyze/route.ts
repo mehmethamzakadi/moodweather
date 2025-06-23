@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Request body'yi parse et
-    const { mood, location } = await request.json()
+    const { mood, location, includeTurkish = false, isPlaylistPrivate = true } = await request.json()
 
     if (!mood || mood.trim().length < 3) {
       return NextResponse.json(
@@ -124,46 +124,46 @@ export async function POST(request: NextRequest) {
       ? `\n\nKullanıcının geçmiş ruh halleri: ${recentSessions.map(s => `"${s.current_mood}" (${s.mood_score}/10)`).join(', ')}`
       : ""
 
-      // Gemini için optimize edilmiş Türkçe prompt
-      const prompt = `Sen deneyimli bir müzik terapi uzmanısın. Türkçe dilinde mükemmel, yaratıcı ve empatik analizler yapıyorsun.
+      // Gemini için optimize edilmiş Türkçe prompt - doğal ve samimi
+      const prompt = `Sen müzik ruh hali uzmanısın ve samimi bir arkadaş gibi konuşuyorsun. Doğal, anlayışlı ama abartısız bir dille analiz yap.
 
-GÖREV: Aşağıdaki ruh halini derinlemesine analiz et ve JSON formatında yanıt ver.
+GÖREV: Bu ruh halini analiz edip JSON döndür.
 
 YAZIM TARZI:
-- Samimi, sıcak ve anlayışlı Türkçe
-- Yaratıcı ifadeler ve müzikal metaforlar
-- Her analiz benzersiz olmalı
-- Empatik ve destekleyici ton
-- Tam Türkçe, hiç İngilizce kelime kullanma
+- Doğal, günlük konuşma dili
+- Samimi ama profesyonel
+- Abartısız, gerçekçi yaklaşım
+- Her analiz farklı ve özgün olmalı
+- Klişe ifadelerden kaçın
 
 JSON YAPISI:
 {
-  "moodAnalysis": "Empatik ve yaratıcı analiz (150-200 kelime, sadece Türkçe)",
-  "targetMood": "Şiirsel hedef tanımı (sadece Türkçe)",
+  "moodAnalysis": "Doğal ve samimi analiz (100-150 kelime)",
+  "targetMood": "Hedef durum (basit açıklama)",
   "moodScore": 1-10 arası sayı,
-  "musicStrategy": "Yaratıcı müzik terapi yaklaşımı (80-120 kelime, sadece Türkçe)",
-  "playlistTheme": "Özgün playlist adı (sadece Türkçe)",
-  "recommendedGenres": ["türkçe-tür1", "türkçe-tür2", "türkçe-tür3"],
+  "musicStrategy": "Müzik stratejisi (60-100 kelime)",
+  "playlistTheme": "Playlist adı (yaratıcı ama sade)",
+  "recommendedGenres": ["tür1", "tür2", "tür3"],
   "energyLevel": "low/medium/high",
   "valence": "negative/neutral/positive",
-  "recommendations": ["türkçe-öneri1", "türkçe-öneri2", "türkçe-öneri3"],
-  "personalizedInsight": "Kişiye özel psikolojik içgörü (60-80 kelime, sadece Türkçe)",
-  "musicMoodConnection": "Müziğin etkisinin açıklaması (60-80 kelime, sadece Türkçe)",
-  "actionPlan": ["türkçe-adım1", "türkçe-adım2", "türkçe-adım3"]
+  "recommendations": ["öneri1", "öneri2", "öneri3"],
+  "personalizedInsight": "Kişisel içgörü (40-60 kelime)",
+  "musicMoodConnection": "Müzik-duygu bağlantısı (40-60 kelime)",
+  "actionPlan": ["adım1", "adım2", "adım3"]
 }
 
-KULLANICI BİLGİLERİ:
+KULLANICI:
 Ruh hali: "${mood}"
 Konum: ${location || "Bilinmeyor"}${contextInfo}
 
-ÖNEMLİ: 
-- Sadece Türkçe kullan, hiç İngilizce kelime yazma
-- Her cümle yaratıcı ve özgün olsun
-- Müzikal metaforlar kullan
-- Empatik ve destekleyici ol
-- Sadece JSON döndür
+İPUÇLARI:
+- Aynı kelimeleri tekrar etme
+- "muhteşem", "harika", "mükemmel" gibi abartılı sıfatları kullanma
+- Her cevap benzersiz olsun
+- Kullanıcının gerçek hislerini anlayarak yaz
+- Spotify'da popüler yabancı müzik türlerini öner
 
-Şimdi bu ruh halini derinlemesine analiz et:`
+Sadece JSON döndür:`
 
       console.log('📤 Gemini API request gönderiliyor...')
 
@@ -304,24 +304,103 @@ Konum: ${location || "Bilinmeyor"}${contextInfo}
     }
 
     // Supabase'e mood session kaydet
-    const { data: moodSession, error: insertError } = await supabase
-      .from('mood_sessions')
-      .insert({
-        user_id: userId,
-        current_mood: mood.substring(0, 500),
-        target_mood: analysisResult.targetMood.substring(0, 200),
-        mood_score: analysisResult.moodScore,
-        location: location,
-        ai_analysis: JSON.stringify(analysisResult),
-        playlist_strategy: analysisResult.musicStrategy.substring(0, 500),
-        session_date: new Date().toISOString()
+    interface SessionData {
+      user_id: string
+      current_mood: string
+      target_mood: string
+      mood_score: number
+      location?: string
+      ai_analysis: string
+      playlist_strategy: string
+      session_date: string
+      include_turkish?: boolean
+      is_playlist_private?: boolean
+    }
+    
+    const sessionData: SessionData = {
+      user_id: userId,
+      current_mood: mood.substring(0, 500),
+      target_mood: analysisResult.targetMood.substring(0, 200),
+      mood_score: analysisResult.moodScore,
+      location: location,
+      ai_analysis: JSON.stringify(analysisResult),
+      playlist_strategy: analysisResult.musicStrategy.substring(0, 500),
+      session_date: new Date().toISOString()
+    }
+    
+    // Yeni kolonları dene, yoksa varsayılan değerlerle devam et
+    try {
+      sessionData.include_turkish = includeTurkish
+      sessionData.is_playlist_private = isPlaylistPrivate
+      
+      const { data: moodSession, error: insertError } = await supabase
+        .from('mood_sessions')
+        .insert(sessionData)
+        .select()
+        .single()
+        
+      if (insertError) {
+        // Eğer kolon yoksa (42703), eski şema ile dene
+        if (insertError.code === '42703') {
+          console.log('⚠️ Eski DB şeması tespit edildi, yeni kolonlar olmadan kaydediliyor...')
+          
+          // Yeni kolonları kaldır
+          delete sessionData.include_turkish
+          delete sessionData.is_playlist_private
+          
+          const { data: fallbackSession, error: fallbackError } = await supabase
+            .from('mood_sessions')
+            .insert(sessionData)
+            .select()
+            .single()
+            
+          if (fallbackError) {
+            console.error('Fallback session insert error:', fallbackError)
+            return NextResponse.json({
+              success: true,
+              sessionId: 'fallback_' + Date.now(),
+              analysis: analysisResult,
+              message: "Analiz tamamlandı ama session kaydedilemedi",
+              aiPowered: true,
+              provider: "gemini",
+              uniqueness: true
+            })
+          }
+          
+          const sessionId = fallbackSession?.id || 'fallback_' + Date.now()
+          console.log('💾 Fallback mood session created:', sessionId)
+          
+          return NextResponse.json({
+            success: true,
+            sessionId: sessionId,
+            analysis: analysisResult,
+            message: "Gemini AI ile Türkçe analiz tamamlandı",
+            aiPowered: true,
+            provider: "gemini",
+            uniqueness: true
+          })
+        }
+        
+        throw insertError
+      }
+      
+      const sessionId = moodSession?.id || 'fallback_' + Date.now()
+      console.log('💾 Supabase mood session created:', sessionId)
+      
+      // Enhanced response
+      return NextResponse.json({
+        success: true,
+        sessionId: sessionId,
+        analysis: analysisResult,
+        message: "Gemini AI ile Türkçe analiz tamamlandı",
+        aiPowered: true,
+        provider: "gemini",
+        uniqueness: true
       })
-      .select()
-      .single()
-
-    if (insertError) {
-      console.error('Supabase mood session insert error:', insertError)
-      // Session kaydetme başarısız olsa da analizi döndür
+      
+    } catch (dbError) {
+      console.error('Database error:', dbError)
+      // Hata olsa da analizi döndür
       return NextResponse.json({
         success: true,
         sessionId: 'fallback_' + Date.now(),
@@ -332,21 +411,6 @@ Konum: ${location || "Bilinmeyor"}${contextInfo}
         uniqueness: true
       })
     }
-
-    const sessionId = moodSession?.id || 'fallback_' + Date.now()
-    
-    console.log('💾 Supabase mood session created:', sessionId)
-
-    // Enhanced response
-    return NextResponse.json({
-      success: true,
-      sessionId: sessionId,
-      analysis: analysisResult,
-      message: "Gemini AI ile Türkçe analiz tamamlandı",
-      aiPowered: true,
-      provider: "gemini",
-      uniqueness: true
-    })
 
   } catch (error) {
     console.error('💥 Gemini analiz hatası:', error)
