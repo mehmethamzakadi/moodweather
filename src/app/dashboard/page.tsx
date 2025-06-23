@@ -5,22 +5,29 @@ import { useSession } from "next-auth/react"
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import Image from "next/image"
+import Toggle from "@/components/ui/toggle"
+import Card from "@/components/ui/card"
+import WeatherWidget from "@/components/ui/weather-widget"
+import { WeatherData } from "@/lib/weather/api"
+
+interface LastAnalysis {
+  sessionId: string;
+  analysis: {
+    moodAnalysis: string;
+    targetMood: string;
+    moodScore: number;
+  };
+}
 
 export default function Dashboard() {
   const { data: session, status } = useSession()
   const router = useRouter()
   const [moodInput, setMoodInput] = useState("")
   const [isAnalyzing, setIsAnalyzing] = useState(false)
-  const [lastAnalysis, setLastAnalysis] = useState<{
-    sessionId: string;
-    analysis: {
-      moodAnalysis: string;
-      targetMood: string;
-      moodScore: number;
-    };
-  } | null>(null)
+  const [lastAnalysis, setLastAnalysis] = useState<LastAnalysis | null>(null)
   const [includeTurkish, setIncludeTurkish] = useState(false)
-  const [isPlaylistPrivate, setIsPlaylistPrivate] = useState(true) // Varsayılan: gizli
+  const [isPlaylistPrivate, setIsPlaylistPrivate] = useState(true)
+  const [currentWeather, setCurrentWeather] = useState<WeatherData | null>(null)
 
   useEffect(() => {
     console.log('Dashboard - Session status:', status)
@@ -45,9 +52,10 @@ export default function Dashboard() {
         },
         body: JSON.stringify({
           mood: moodInput.trim(),
-          location: "Istanbul", // Şimdilik sabit, sonra GPS ekleriz
-          includeTurkish: includeTurkish, // Türkçe filtresi
-          isPlaylistPrivate: isPlaylistPrivate // Gizlilik tercihi
+          location: currentWeather?.location || "Istanbul",
+          weather: currentWeather,
+          includeTurkish: includeTurkish,
+          isPlaylistPrivate: isPlaylistPrivate
         }),
       })
 
@@ -58,7 +66,6 @@ export default function Dashboard() {
       const result = await response.json()
       setLastAnalysis(result)
       
-      // Debug için lastAnalysis state'ini logla
       if (lastAnalysis) {
         console.log('Previous analysis:', lastAnalysis)
       }
@@ -66,7 +73,6 @@ export default function Dashboard() {
       
       setMoodInput("")
       
-      // Başarılı analiz sonrası results sayfasına yönlendir
       router.push(`/mood/results/${result.sessionId}`)
       
     } catch (error) {
@@ -75,6 +81,11 @@ export default function Dashboard() {
     } finally {
       setIsAnalyzing(false)
     }
+  }
+
+  const handleWeatherChange = (weather: WeatherData) => {
+    setCurrentWeather(weather)
+    console.log('Hava durumu güncellendi:', weather)
   }
 
   if (status === "loading") {
@@ -93,7 +104,8 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-green-400 via-blue-500 to-purple-600">{/* Header */}
+    <div className="min-h-screen bg-gradient-to-br from-green-400 via-blue-500 to-purple-600">
+      {/* Header */}
       <header className="bg-white/10 backdrop-blur-sm border-b border-white/20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-4">
@@ -133,179 +145,208 @@ export default function Dashboard() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Mood Input Card */}
-        <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-8 mb-8 border border-white/20">
-          <div className="text-center mb-6">
-            <h2 className="text-3xl font-bold text-white mb-2">
-              🎭 Ruh Halin Nasıl?
-            </h2>
-            <p className="text-white/80 text-lg">
-              Şu anki hislerini bizimle paylaş, sana uygun müzik önerelim
-            </p>
-          </div>
-
-          <form onSubmit={handleMoodSubmit} className="max-w-2xl mx-auto">
-            <div className="space-y-6">
-              <div>
-                <label htmlFor="mood" className="block text-white font-medium mb-3">
-                  Bugün kendini nasıl hissediyorsun?
-                </label>
-                <textarea
-                  id="mood"
-                  value={moodInput}
-                  onChange={(e) => setMoodInput(e.target.value)}
-                  placeholder="Örnek: Yorgun ve stresli hissediyorum, biraz dinlenmek istiyorum..."
-                  className="w-full h-32 px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-white/60 focus:outline-none focus:border-white/40 focus:bg-white/20 transition-all duration-200 resize-none"
-                  disabled={isAnalyzing}
-                />
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
+          {/* Sol Panel - Mood Input */}
+          <div className="lg:col-span-2 space-y-6">
+            {/* Mood Input Card */}
+            <Card variant="gradient" padding="lg">
+              <div className="text-center mb-6">
+                <h2 className="text-3xl font-bold text-white mb-2">
+                  🎭 Ruh Halin Nasıl?
+                </h2>
+                <p className="text-white/80 text-lg">
+                  Şu anki hislerini bizimle paylaş, sana uygun müzik önerelim
+                </p>
               </div>
-              
-              <div className="flex flex-col sm:flex-row gap-4 items-center">
-                <button
-                  type="submit"
-                  disabled={!moodInput.trim() || isAnalyzing}
-                  className="flex-1 sm:flex-none bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-3 px-8 rounded-xl transition-all duration-200 transform hover:scale-105 disabled:hover:scale-100 flex items-center justify-center space-x-2"
-                >
-                  {isAnalyzing ? (
-                    <>
-                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                      <span>Analiz Ediliyor...</span>
-                    </>
-                  ) : (
-                    <>
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                      </svg>
-                      <span>AI Analizi Başlat</span>
-                    </>
-                  )}
-                </button>
-                
-                <div className="text-white/60 text-sm text-center sm:text-left">
-                  ✨ AI destekli kişiselleştirilmiş müzik önerileri
+
+              <form onSubmit={handleMoodSubmit} className="space-y-6">
+                <div>
+                  <label htmlFor="mood" className="block text-white font-medium mb-3">
+                    Bugün kendini nasıl hissediyorsun?
+                  </label>
+                  <textarea
+                    id="mood"
+                    value={moodInput}
+                    onChange={(e) => setMoodInput(e.target.value)}
+                    placeholder="Örnek: Yorgun ve stresli hissediyorum, biraz dinlenmek istiyorum..."
+                    className="w-full h-32 px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-white/60 focus:outline-none focus:border-white/40 focus:bg-white/20 transition-all duration-200 resize-none"
+                    disabled={isAnalyzing}
+                  />
                 </div>
-              </div>
-            </div>
-          </form>
+                
+                <div className="flex flex-col sm:flex-row gap-4 items-center">
+                  <button
+                    type="submit"
+                    disabled={!moodInput.trim() || isAnalyzing}
+                    className="flex-1 sm:flex-none bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-3 px-8 rounded-xl transition-all duration-200 transform hover:scale-105 disabled:hover:scale-100 flex items-center justify-center space-x-2"
+                  >
+                    {isAnalyzing ? (
+                      <>
+                        <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                        <span>Analiz Ediliyor...</span>
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                        </svg>
+                        <span>AI Analizi Başlat</span>
+                      </>
+                    )}
+                  </button>
+                  
+                  <div className="text-white/60 text-sm text-center sm:text-left">
+                    ✨ AI destekli kişiselleştirilmiş müzik önerileri
+                  </div>
+                </div>
+              </form>
+            </Card>
 
-          {/* Türkçe ve Gizlilik Filtreleri */}
-          <div className="flex flex-col sm:flex-row gap-6 pt-6 border-t border-white/20">
-            {/* Türkçe Filtresi */}
-            <div className="flex items-center justify-center space-x-3">
-              <label className="flex items-center space-x-2 cursor-pointer">
-                <input
-                  type="checkbox"
+            {/* Modern Filtreler */}
+            <Card variant="glass" padding="md">
+              <h3 className="text-white font-semibold mb-4 flex items-center space-x-2">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4" />
+                </svg>
+                <span>Playlist Ayarları</span>
+              </h3>
+              
+              <div className="space-y-4">
+                <Toggle
                   checked={includeTurkish}
-                  onChange={(e) => setIncludeTurkish(e.target.checked)}
-                  className="w-4 h-4 text-blue-600 bg-white/10 border-white/30 rounded focus:ring-blue-500 focus:ring-2"
+                  onChange={setIncludeTurkish}
+                  label="Türkçe Şarkılar"
+                  description={includeTurkish ? "Türkçe + Yabancı karışık" : "Sadece yabancı müzik"}
+                  icon={<span className="text-lg">{includeTurkish ? "🇹🇷" : "🌍"}</span>}
+                  color="blue"
+                  size="md"
                 />
-                <span className="text-white/80 text-sm">
-                  Türkçe şarkılar da olsun
-                </span>
-              </label>
-              <div className="text-white/60 text-xs">
-                {includeTurkish ? '🇹🇷 Türkçe + Yabancı' : '🌍 Sadece Yabancı'}
-              </div>
-            </div>
-            
-            {/* Gizlilik Filtresi */}
-            <div className="flex items-center justify-center space-x-3">
-              <label className="flex items-center space-x-2 cursor-pointer">
-                <input
-                  type="checkbox"
+                
+                <Toggle
                   checked={isPlaylistPrivate}
-                  onChange={(e) => setIsPlaylistPrivate(e.target.checked)}
-                  className="w-4 h-4 text-purple-600 bg-white/10 border-white/30 rounded focus:ring-purple-500 focus:ring-2"
+                  onChange={setIsPlaylistPrivate}
+                  label="Gizli Playlist"
+                  description={isPlaylistPrivate ? "Sadece senin görebileceğin" : "Herkese açık playlist"}
+                  icon={<span className="text-lg">{isPlaylistPrivate ? "🔒" : "🌍"}</span>}
+                  color="purple"
+                  size="md"
                 />
-                <span className="text-white/80 text-sm">
-                  Playlist&apos;i gizli yap
-                </span>
-              </label>
-              <div className="text-white/60 text-xs">
-                {isPlaylistPrivate ? '🔒 Sadece Ben' : '🌍 Herkese Açık'}
               </div>
-            </div>
+            </Card>
+
+            {/* Quick Mood Buttons */}
+            <Card variant="glass" padding="md">
+              <h3 className="text-white font-semibold mb-4 text-center">Hızlı Seçim</h3>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                {[
+                  { emoji: "😴", text: "Yorgun", mood: "Çok yorgun ve dinlenmeye ihtiyacım var" },
+                  { emoji: "😰", text: "Stresli", mood: "Stresli hissediyorum, sakinleşmek istiyorum" },
+                  { emoji: "😊", text: "Mutlu", mood: "Kendimi harika hissediyorum, enerjik müzikler dinlemek istiyorum" },
+                  { emoji: "😔", text: "Melankolik", mood: "Biraz melankolik hissediyorum, duygusal müzikler dinlemek istiyorum" },
+                  { emoji: "⚡", text: "Enerjik", mood: "Çok enerjik hissediyorum, dans edebileceğim müzikler istiyorum" },
+                  { emoji: "🧘", text: "Huzurlu", mood: "Huzurlu ve sakin hissediyorum, rahatlatıcı müzikler dinlemek istiyorum" },
+                ].map((quickMood) => (
+                  <button
+                    key={quickMood.text}
+                    onClick={() => setMoodInput(quickMood.mood)}
+                    disabled={isAnalyzing}
+                    className="bg-white/10 hover:bg-white/20 disabled:opacity-50 text-white p-3 rounded-xl transition-all duration-200 transform hover:scale-105 disabled:hover:scale-100 flex flex-col items-center space-y-1"
+                  >
+                    <span className="text-2xl">{quickMood.emoji}</span>
+                    <span className="text-xs font-medium">{quickMood.text}</span>
+                  </button>
+                ))}
+              </div>
+            </Card>
           </div>
 
-          {/* Quick Mood Buttons */}
-          <div className="mt-8 pt-6 border-t border-white/20">
-            <p className="text-white/80 text-center mb-4">Ya da hızlı seçim yap:</p>
-            <div className="flex flex-wrap justify-center gap-3">
-              {[
-                { emoji: "😴", text: "Yorgun", mood: "Çok yorgun ve dinlenmeye ihtiyacım var" },
-                { emoji: "😰", text: "Stresli", mood: "Stresli hissediyorum, sakinleşmek istiyorum" },
-                { emoji: "😊", text: "Mutlu", mood: "Kendimi harika hissediyorum, enerjik müzikler dinlemek istiyorum" },
-                { emoji: "😔", text: "Melankolik", mood: "Biraz melankolik hissediyorum, duygusal müzikler dinlemek istiyorum" },
-                { emoji: "⚡", text: "Enerjik", mood: "Çok enerjik hissediyorum, dans edebileceğim müzikler istiyorum" },
-                { emoji: "🧘", text: "Huzurlu", mood: "Huzurlu ve sakin hissediyorum, rahatlatıcı müzikler dinlemek istiyorum" },
-              ].map((quickMood) => (
-                <button
-                  key={quickMood.text}
-                  onClick={() => setMoodInput(quickMood.mood)}
-                  disabled={isAnalyzing}
-                  className="bg-white/10 hover:bg-white/20 disabled:opacity-50 text-white px-4 py-2 rounded-lg transition-all duration-200 transform hover:scale-105 disabled:hover:scale-100 flex items-center space-x-2"
-                >
-                  <span className="text-lg">{quickMood.emoji}</span>
-                  <span className="text-sm">{quickMood.text}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
+          {/* Sağ Panel - Weather & Stats */}
+          <div className="space-y-6">
+            {/* Weather Widget */}
+            <WeatherWidget 
+              location="İstanbul"
+              onWeatherChange={handleWeatherChange}
+            />
 
-        {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          <div className="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-white/60 text-sm">Spotify Bağlantısı</p>
-                <p className="text-2xl font-bold text-white">Aktif</p>
-              </div>
-              <div className="w-12 h-12 bg-green-500/30 rounded-full flex items-center justify-center">
-                <svg className="w-6 h-6 text-green-400" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.84-.179-.84-.66 0-.479.359-.78.719-.84 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.299 1.02v.061zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.42 1.56-.299.421-1.02.599-1.559.3z"/>
-                </svg>
-              </div>
-            </div>
-          </div>
+            {/* Stats Grid */}
+            <div className="space-y-4">
+              <Card variant="glass" padding="md" hover>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-white/60 text-sm">Spotify Bağlantısı</p>
+                    <p className="text-xl font-bold text-white">Aktif</p>
+                  </div>
+                  <div className="w-10 h-10 bg-green-500/30 rounded-full flex items-center justify-center">
+                    <svg className="w-5 h-5 text-green-400" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.84-.179-.84-.66 0-.479.359-.78.719-.84 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.299 1.02v.061zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.42 1.56-.299.421-1.02.599-1.559.3z"/>
+                    </svg>
+                  </div>
+                </div>
+              </Card>
 
-          <div className="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-white/60 text-sm">Mood Seansları</p>
-                <p className="text-2xl font-bold text-white">0</p>
-              </div>
-              <div className="w-12 h-12 bg-blue-500/30 rounded-full flex items-center justify-center">
-                <svg className="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
-                </svg>
-              </div>
-            </div>
-          </div>
+              <Card variant="glass" padding="md" hover>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-white/60 text-sm">Mood Seansları</p>
+                    <p className="text-xl font-bold text-white">0</p>
+                  </div>
+                  <div className="w-10 h-10 bg-blue-500/30 rounded-full flex items-center justify-center">
+                    <svg className="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                    </svg>
+                  </div>
+                </div>
+              </Card>
 
-          <div className="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-white/60 text-sm">Oluşturulan Playlistler</p>
-                <p className="text-2xl font-bold text-white">0</p>
-              </div>
-              <div className="w-12 h-12 bg-purple-500/30 rounded-full flex items-center justify-center">
-                <svg className="w-6 h-6 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                </svg>
-              </div>
+              <Card variant="glass" padding="md" hover>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-white/60 text-sm">Oluşturulan Playlistler</p>
+                    <p className="text-xl font-bold text-white">0</p>
+                  </div>
+                  <div className="w-10 h-10 bg-purple-500/30 rounded-full flex items-center justify-center">
+                    <svg className="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                    </svg>
+                  </div>
+                </div>
+              </Card>
             </div>
+
+            {/* Hava Durumu Etkisi Bilgi Kartı */}
+            {currentWeather && (
+              <Card variant="gradient" padding="md">
+                <h4 className="text-white font-medium mb-2 flex items-center space-x-2">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span>Hava Durumu Etkisi</span>
+                </h4>
+                <p className="text-white/80 text-sm">
+                  {currentWeather.temperature > 25 ? "Sıcak hava enerjik müzikler önerir" :
+                   currentWeather.temperature < 10 ? "Soğuk hava sakin müzikler önerir" :
+                   "Ilıman hava dengeli müzikler önerir"}
+                </p>
+              </Card>
+            )}
           </div>
         </div>
 
         {/* Session Debug Info */}
         {process.env.NODE_ENV === "development" && (
-          <div className="mt-8 bg-black/20 backdrop-blur-sm rounded-xl p-6 border border-white/20">
+          <Card variant="glass" padding="md">
             <h3 className="text-lg font-semibold text-white mb-4">🔧 Debug Bilgileri</h3>
-            <pre className="text-green-300 text-sm overflow-auto">
-              {JSON.stringify(session, null, 2)}
-            </pre>
-          </div>
+            <div className="space-y-2 text-sm">
+              <div className="text-green-300">
+                <strong>Session:</strong> {JSON.stringify(session?.user, null, 2)}
+              </div>
+              {currentWeather && (
+                <div className="text-blue-300">
+                  <strong>Weather:</strong> {JSON.stringify(currentWeather, null, 2)}
+                </div>
+              )}
+            </div>
+          </Card>
         )}
       </main>
     </div>

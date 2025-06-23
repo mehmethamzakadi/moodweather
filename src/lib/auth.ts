@@ -1,4 +1,4 @@
-// src/lib/auth.ts - NextAuth v4 Pure JWT Configuration
+// src/lib/auth.ts - NextAuth v4 Pure JWT Configuration (Minimal Cookie Setup)
 import { NextAuthOptions } from "next-auth"
 import { JWT } from "next-auth/jwt"
 import SpotifyProvider from "next-auth/providers/spotify"
@@ -22,7 +22,6 @@ const scopes = [
 ].join(" ")
 
 export const authOptions: NextAuthOptions = {
-
   providers: [
     SpotifyProvider({
       clientId: process.env.SPOTIFY_CLIENT_ID!,
@@ -30,61 +29,12 @@ export const authOptions: NextAuthOptions = {
       authorization: {
         params: {
           scope: scopes,
-          show_dialog: "true", // Force Spotify login dialog
-          prompt: "login" // Force re-authentication
+          show_dialog: "true",
         },
       },
     }),
   ],
-  // Cookie ayarları - 127.0.0.1 için
-  cookies: {
-    sessionToken: {
-      name: `next-auth.session-token`,
-      options: {
-        httpOnly: true,
-        sameSite: 'lax',
-        path: '/',
-        secure: false, // HTTP için false
-      },
-    },
-    callbackUrl: {
-      name: `next-auth.callback-url`,
-      options: {
-        sameSite: 'lax',
-        path: '/',
-        secure: false,
-      },
-    },
-    csrfToken: {
-      name: `next-auth.csrf-token`,
-      options: {
-        httpOnly: true,
-        sameSite: 'lax',
-        path: '/',
-        secure: false,
-      },
-    },
-    pkceCodeVerifier: {
-      name: `next-auth.pkce.code_verifier`,
-      options: {
-        httpOnly: true,
-        sameSite: 'lax',
-        path: '/',
-        secure: false,
-        maxAge: 60 * 15, // 15 minutes
-      },
-    },
-    state: {
-      name: `next-auth.state`,
-      options: {
-        httpOnly: true,
-        sameSite: 'lax',
-        path: '/',
-        secure: false,
-        maxAge: 60 * 15, // 15 minutes
-      },
-    },
-  },
+  
   callbacks: {
     async jwt({ token, account, user }): Promise<JWT> {
       // İlk giriş sırasında Spotify bilgilerini kaydet
@@ -139,20 +89,20 @@ export const authOptions: NextAuthOptions = {
       return extendedSession
     },
   },
+  
   pages: {
     signIn: "/auth/signin",
     error: "/auth/error",
     signOut: "/auth/signout",
   },
+  
   session: {
     strategy: "jwt",
     maxAge: 24 * 60 * 60, // 24 saat
   },
-  events: {
-    async signOut() {
-      console.log('NextAuth signOut event triggered')
-    }
-  }
+  
+  // Debug için
+  debug: process.env.NODE_ENV === 'development',
 }
 
 // Spotify access token'ını yenileme fonksiyonu
