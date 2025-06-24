@@ -6,7 +6,7 @@ import { authOptions } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { createSpotifyClient, SpotifyAPI } from "@/lib/spotify/api"
 import type { SpotifyTrack } from "@/lib/spotify/api"
-import { WeatherAPI } from "@/lib/weather/api"
+import { WeatherAPI, WeatherData } from "@/lib/weather/api"
 
 interface WeatherContext {
   condition: string
@@ -14,6 +14,15 @@ interface WeatherContext {
   description: string
   humidity: number
   windSpeed: number
+  // WeatherData ile uyumlu olması için eksik alanları ekle
+  pressure?: number
+  visibility?: number
+  location?: string
+  country?: string
+  city?: string
+  windDirection?: number
+  uvIndex?: number
+  cloudCover?: number
 }
 
 interface TimeEffect {
@@ -116,6 +125,30 @@ function enhanceGenresWithWeather(baseGenres: string[], weather: WeatherContext 
   }
   
   return [...new Set(enhanced)] // Tekrarları kaldır
+}
+
+// WeatherContext'i WeatherData'ya dönüştür
+function convertWeatherContextToWeatherData(weather: WeatherContext): WeatherData {
+  return {
+    temperature: weather.temperature,
+    description: weather.description,
+    condition: weather.condition,
+    humidity: weather.humidity,
+    windSpeed: weather.windSpeed,
+    pressure: weather.pressure || 1013,
+    visibility: weather.visibility || 10,
+    location: weather.location || "Unknown",
+    country: weather.country || "Unknown",
+    timezone: "UTC",
+    icon: "01d",
+    sunrise: Date.now() / 1000,
+    sunset: Date.now() / 1000 + 43200,
+    uvIndex: weather.uvIndex || 0,
+    coordinates: {
+      lat: 0,
+      lon: 0
+    }
+  }
 }
 
 // Yaratıcı playlist isimleri
@@ -224,7 +257,10 @@ export async function POST(request: NextRequest) {
     // Hava durumu verisi varsa audio features'ı ayarla
     if (analysis.environmentalContext?.weather) {
       const weather = analysis.environmentalContext.weather as WeatherContext
-      const weatherMoodFactor = WeatherAPI.calculateMoodFactor(weather)
+      
+      // WeatherContext'i WeatherData'ya dönüştür (DÜZELTİLDİ)
+      const weatherData = convertWeatherContextToWeatherData(weather)
+      const weatherMoodFactor = WeatherAPI.calculateMoodFactor(weatherData)
       const timeEffect = WeatherAPI.calculateTimeEffect()
       
       console.log('🌤️ Hava durumu verileri playlist\'e dahil ediliyor...', {
@@ -234,14 +270,17 @@ export async function POST(request: NextRequest) {
         valenceModifier: weatherMoodFactor.valenceModifier
       })
       
-      // Audio features'ı hava durumuna göre ayarla
+      // Audio features'ı hava durumuna göre ayarla (NULL CHECK EKLENDİ)
+      const energyModifier = analysis.environmentalContext?.energyModifier ?? 0
+      const valenceModifier = analysis.environmentalContext?.valenceModifier ?? 0
+      
       audioFeatures = {
         ...audioFeatures,
-        energy: Math.max(0.1, Math.min(0.9, audioFeatures.energy + (analysis.environmentalContext.energyModifier || 0))),
-        valence: Math.max(0.1, Math.min(0.9, audioFeatures.valence + (analysis.environmentalContext.valenceModifier || 0))),
-        tempo: adjustTempoForWeather(audioFeatures.tempo, weather, timeEffect),
-        acousticness: adjustAcousticnessForWeather(audioFeatures.acousticness, weather),
-        instrumentalness: adjustInstrumentalness(audioFeatures.instrumentalness, weather, timeEffect)
+        energy: Math.max(0.1, Math.min(0.9, audioFeatures.energy + energyModifier)),
+        valence: Math.max(0.1, Math.min(0.9, audioFeatures.valence + valenceModifier)),
+        tempo: adjustTempoForWeather(audioFeatures.tempo ?? 120, weather, timeEffect),
+        acousticness: adjustAcousticnessForWeather(audioFeatures.acousticness ?? 0.5, weather),
+        instrumentalness: adjustInstrumentalness(audioFeatures.instrumentalness ?? 0.0, weather, timeEffect)
       }
       
       console.log('🎚️ Hava durumu ayarlı audio features:', audioFeatures)
