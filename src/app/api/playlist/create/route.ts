@@ -5,6 +5,8 @@ import type { Session } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { createSpotifyClient, SpotifyAPI } from "@/lib/spotify/api"
+import { AudioFeaturesValidator } from "@/lib/spotify/audio-features-validator"
+import { EnhancedSearchStrategy } from "@/lib/spotify/anti-repetition-system"
 import type { SpotifyTrack } from "@/lib/spotify/api"
 import type { AudioFeatures } from "@/lib/playlist/services"
 import {
@@ -151,23 +153,56 @@ class PlaylistRouteHandler {
         context
       )
 
-      PlaylistErrorHandler.logInfo('Weather-enhanced search starting', { 
+      PlaylistErrorHandler.logInfo('Enhanced search with anti-repetition starting', { 
         includeTurkish,
-        weatherCondition: context.weather?.condition 
+        weatherCondition: context.weather?.condition,
+        targetEnergy: adjustedFeatures.energy,
+        targetValence: adjustedFeatures.valence,
+        genres: enhancedGenres.slice(0, 3)
       })
 
-      const tracks = await spotifyClient.searchTracksAdvanced({
-        genres: enhancedGenres,
-        audioFeatures: adjustedFeatures,
-        includeTurkish,
-        limit: 50,
-        weatherContext: context.weather
-      })
+      // Use enhanced search strategy with anti-repetition
+      const rawTracks = await EnhancedSearchStrategy.executeAntiRepetitionSearch(
+        spotifyClient,
+        {
+          genres: enhancedGenres,
+          audioFeatures: adjustedFeatures,
+          includeTurkish,
+          weatherContext: context.weather
+        }
+      )
 
-      PlaylistErrorHandler.logSuccess(`Found ${tracks.length} tracks`, 'weather-enhanced search')
-      return tracks
+      // Enhanced validation - this will solve the Cigarettes After Sex problem
+      const validatedTracks = await this.validateTracksWithAudioFeatures(
+        spotifyClient,
+        rawTracks,
+        adjustedFeatures,
+        enhancedGenres
+      )
+
+      PlaylistErrorHandler.logSuccess(
+        `Enhanced search completed: ${validatedTracks.length} validated tracks from ${rawTracks.length} candidates`, 
+        'anti-repetition + validation system'
+      )
+      
+      return validatedTracks
     } catch (searchError) {
-      throw PlaylistErrorHandler.handleSearchError(searchError)
+      PlaylistErrorHandler.logError('Enhanced search failed, falling back to original', searchError)
+      
+      // Fallback to original search if enhanced search fails
+      try {
+        const fallbackTracks = await spotifyClient.searchTracksAdvanced({
+          genres: context.genres,
+          audioFeatures: context.audioFeatures,
+          includeTurkish,
+          limit: 50,
+          weatherContext: context.weather
+        })
+        
+        return fallbackTracks.slice(0, 25)
+      } catch (fallbackError) {
+        throw PlaylistErrorHandler.handleSearchError(fallbackError)
+      }
     }
   }
 
@@ -192,6 +227,87 @@ class PlaylistRouteHandler {
     )
     
     return selectedTracks
+  }
+
+  // NEW: Enhanced validation method to prevent Cigarettes After Sex type mismatches
+  private async validateTracksWithAudioFeatures(
+    spotifyClient: SpotifyAPI,
+    tracks: SpotifyTrack[],
+    targetFeatures: AudioFeatures,
+    genres: string[]
+  ): Promise<SpotifyTrack[]> {
+    try {
+      // Get audio features for all tracks
+      const tracksWithFeatures = await Promise.all(
+        tracks.map(async (track): Promise<SpotifyTrack & { audioFeatures?: AudioFeatures }> => {
+          try {
+            const audioFeatures = await AudioFeaturesValidator.getEnhancedAudioFeatures(
+              spotifyClient,
+              track.id
+            )
+            return { 
+              ...track, 
+              audioFeatures: audioFeatures ? {
+                energy: audioFeatures.energy,
+                valence: audioFeatures.valence,
+                tempo: audioFeatures.tempo,
+                acousticness: audioFeatures.acousticness ?? 0.5,
+                instrumentalness: audioFeatures.instrumentalness ?? 0.1
+              } : undefined 
+            }
+          } catch (error) {
+            PlaylistErrorHandler.logError(`Failed to get audio features for ${track.name}`, error)
+            return { ...track, audioFeatures: undefined }
+          }
+        })
+      )
+
+      // Filter out blacklisted artists for genre
+      const nonBlacklistedTracks = tracksWithFeatures.filter(track => 
+        !AudioFeaturesValidator.isBlacklisted(track, genres)
+      )
+
+      // Validate audio features compatibility
+      const { validTracks, invalidTracks, stats } = AudioFeaturesValidator.validateTracks(
+        nonBlacklistedTracks,
+        {
+          energy: targetFeatures.energy,
+          valence: targetFeatures.valence, 
+          tempo: targetFeatures.tempo,
+          acousticness: targetFeatures.acousticness,
+          instrumentalness: targetFeatures.instrumentalness,
+          danceability: 0.7 // High danceability for electronic music
+        },
+        genres
+      )
+
+      // Log validation results
+      PlaylistErrorHandler.logInfo('Audio features validation completed', {
+        totalTracks: tracks.length,
+        tracksWithFeatures: tracksWithFeatures.length,
+        nonBlacklisted: nonBlacklistedTracks.length,
+        validTracks: validTracks.length,
+        averageScore: Math.round(stats.averageScore),
+        rejectedCount: invalidTracks.length
+      })
+
+      // Log some rejected tracks for debugging
+      if (invalidTracks.length > 0) {
+        PlaylistErrorHandler.logInfo('Sample rejected tracks', 
+          invalidTracks.slice(0, 3).map(({ track, reason }) => ({
+            name: track.name,
+            artist: track.artists[0]?.name,
+            reason: reason.substring(0, 100)
+          }))
+        )
+      }
+
+      return validTracks
+    } catch (error) {
+      PlaylistErrorHandler.logError('Audio features validation failed', error)
+      // Fallback to original tracks if validation fails
+      return tracks
+    }
   }
 
   private async createSpotifyPlaylist(

@@ -101,7 +101,7 @@ export default function HomePage() {
             </div>
           </div>
           
-          <h1 className="text-6xl md:text-7xl font-bold text-white mb-4 bg-gradient-to-r from-green-400 via-blue-500 to-purple-600 bg-clip-text text-transparent">
+          <h1 className="text-6xl md:text-7xl font-bold mb-4 bg-gradient-to-r from-green-400 via-blue-500 to-purple-600 bg-clip-text text-transparent">
             MoodWeather
           </h1>
           
