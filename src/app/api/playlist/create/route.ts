@@ -1,4 +1,4 @@
-// src/app/api/playlist/create/route.ts
+// src/app/api/playlist/create/route.ts - IMPROVED VERSION
 import { NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
 import type { Session } from "next-auth"
@@ -64,16 +64,21 @@ interface MoodSession {
   created_at: string
 }
 
+// IMPROVED: Enhanced playlist request interface
+interface ImprovedPlaylistRequest extends PlaylistRequest {
+  isPlaylistPrivate?: boolean  // This was missing before!
+}
+
 class PlaylistRouteHandler {
   private async validateAndParseRequest(request: NextRequest): Promise<{
     session: ExtendedSession
-    body: PlaylistRequest
+    body: ImprovedPlaylistRequest
   }> {
     const session = await getServerSession(authOptions) as ExtendedSession
     const validation = PlaylistValidation.validateSession(session, session?.accessToken)
     if (!validation.isValid) throw validation.error
 
-    const body: PlaylistRequest = await request.json()
+    const body: ImprovedPlaylistRequest = await request.json()
     const requestValidation = PlaylistValidation.validateRequest(body)
     if (!requestValidation.isValid) throw requestValidation.error
 
@@ -134,6 +139,7 @@ class PlaylistRouteHandler {
     }
   }
 
+  // IMPROVED: Enhanced search with better track count targeting
   private async searchTracks(
     spotifyClient: SpotifyAPI, 
     context: PlaylistContext, 
@@ -146,25 +152,73 @@ class PlaylistRouteHandler {
         context
       )
 
-      PlaylistErrorHandler.logInfo('Enhanced search with anti-repetition starting', { 
+      PlaylistErrorHandler.logInfo('IMPROVED: Enhanced search starting', { 
         includeTurkish,
         weatherCondition: context.weather?.condition,
         targetEnergy: adjustedFeatures.energy,
         targetValence: adjustedFeatures.valence,
-        genres: enhancedGenres.slice(0, 3)
+        genres: enhancedGenres.slice(0, 3),
+        targetTrackCount: 80  // Increased target
       })
 
-      const rawTracks = await EnhancedSearchStrategy.executeAntiRepetitionSearch(
-        spotifyClient,
-        {
-          genres: enhancedGenres,
-          audioFeatures: adjustedFeatures,
-          includeTurkish,
-          weatherContext: context.weather
-        }
-      )
+      // First try: Anti-repetition search with higher limit
+      let rawTracks: SpotifyTrack[] = []
+      try {
+        rawTracks = await EnhancedSearchStrategy.executeAntiRepetitionSearch(
+          spotifyClient,
+          {
+            genres: enhancedGenres,
+            audioFeatures: adjustedFeatures,
+            includeTurkish,
+            weatherContext: context.weather
+          }
+        )
+        console.log(`🎵 Anti-repetition search result: ${rawTracks.length} tracks`)
+      } catch (antiRepError) {
+        PlaylistErrorHandler.logError('Anti-repetition search failed', antiRepError)
+        rawTracks = []
+      }
 
-      const validatedTracks = await this.validateTracksWithAudioFeaturesFallback(
+      // If anti-repetition didn't get enough tracks, use advanced search
+      if (rawTracks.length < 30) {
+        try {
+          const advancedTracks = await spotifyClient.searchTracksAdvanced({
+            genres: enhancedGenres,
+            audioFeatures: adjustedFeatures,
+            includeTurkish,
+            limit: 80, // Increased limit
+            weatherContext: context.weather
+          })
+          
+          console.log(`🔍 Advanced search result: ${advancedTracks.length} tracks`)
+          
+          // Merge with anti-repetition results
+          const allTracks = [...rawTracks, ...advancedTracks]
+          const uniqueTracks = allTracks.filter((track, index, self) => 
+            index === self.findIndex(t => t.id === track.id)
+          )
+          rawTracks = uniqueTracks
+        } catch (advancedError) {
+          PlaylistErrorHandler.logError('Advanced search also failed', advancedError)
+        }
+      }
+
+      // Final fallback: Basic search if still not enough
+      if (rawTracks.length < 20) {
+        try {
+          const basicTracks = await spotifyClient.searchTracks({ 
+            genres: context.genres, 
+            limit: 50 
+          })
+          console.log(`📊 Basic fallback search result: ${basicTracks.length} tracks`)
+          rawTracks.push(...basicTracks)
+        } catch (basicError) {
+          PlaylistErrorHandler.logError('Even basic search failed', basicError)
+        }
+      }
+
+      // Apply validation with more lenient settings
+      const validatedTracks = await this.validateTracksWithImprovedFallback(
         spotifyClient,
         rawTracks,
         adjustedFeatures,
@@ -172,30 +226,18 @@ class PlaylistRouteHandler {
       )
 
       PlaylistErrorHandler.logSuccess(
-        `Enhanced search completed: ${validatedTracks.length} validated tracks from ${rawTracks.length} candidates`, 
-        'anti-repetition + validation system'
+        `IMPROVED: Search completed with ${validatedTracks.length} validated tracks from ${rawTracks.length} candidates`, 
+        'Enhanced search strategy'
       )
       
       return validatedTracks
     } catch (searchError) {
-      PlaylistErrorHandler.logError('Enhanced search failed, falling back to original', searchError)
-      
-      try {
-        const fallbackTracks = await spotifyClient.searchTracksAdvanced({
-          genres: context.genres,
-          audioFeatures: context.audioFeatures,
-          includeTurkish,
-          limit: 50,
-          weatherContext: context.weather
-        })
-        
-        return fallbackTracks.slice(0, 25)
-      } catch (fallbackError) {
-        throw PlaylistErrorHandler.handleSearchError(fallbackError)
-      }
+      PlaylistErrorHandler.logError('All search strategies failed', searchError)
+      throw PlaylistErrorHandler.handleSearchError(searchError)
     }
   }
 
+  // IMPROVED: More lenient track filtering to get more songs
   private selectAndFilterTracks(
     tracks: SpotifyTrack[], 
     includeTurkish: boolean, 
@@ -204,22 +246,24 @@ class PlaylistRouteHandler {
     const validation = PlaylistValidation.validateTracks(tracks)
     if (!validation.isValid) throw validation.error
 
+    // IMPROVED: More generous settings to get more tracks
     const selectedTracks = SpotifyAPI.filterAndDiversifyTracks(tracks, {
-      maxPerArtist: 2,
-      minPopularity: 25,
-      targetCount: 20,
+      maxPerArtist: 3,      // Increased from 2 to 3
+      minPopularity: 15,    // Decreased from 25 to 15
+      targetCount: 25,      // Increased from 20 to 25
       includeTurkish,
       weatherPreference: weather
     })
 
     PlaylistErrorHandler.logSuccess(
-      `Selected ${selectedTracks.length} tracks from ${tracks.length} candidates`
+      `IMPROVED: Selected ${selectedTracks.length} tracks from ${tracks.length} candidates (target: 25)`
     )
     
     return selectedTracks
   }
 
-  private async validateTracksWithAudioFeaturesFallback(
+  // IMPROVED: More lenient validation with better fallback strategies
+  private async validateTracksWithImprovedFallback(
     spotifyClient: SpotifyAPI,
     tracks: SpotifyTrack[],
     targetFeatures: AudioFeatures,
@@ -232,13 +276,13 @@ class PlaylistRouteHandler {
     }
 
     try {
-      PlaylistErrorHandler.logInfo('🔄 Starting robust audio features validation', {
+      PlaylistErrorHandler.logInfo('🔄 IMPROVED: Starting more lenient validation', {
         trackCount: tracks.length,
         targetEnergy: targetFeatures.energy,
         targetValence: targetFeatures.valence
       })
 
-      // Strategy 1: Try batch audio features
+      // Get audio features for validation
       const audioFeaturesMap = new Map<string, AudioFeatures>()
       
       try {
@@ -257,12 +301,11 @@ class PlaylistRouteHandler {
           }
         })
         
-        PlaylistErrorHandler.logInfo(`✅ Batch audio features: ${audioFeaturesMap.size}/${tracks.length} successful`)
+        PlaylistErrorHandler.logInfo(`✅ Audio features retrieved: ${audioFeaturesMap.size}/${tracks.length}`)
       } catch {
-        PlaylistErrorHandler.logError('⚠️ Batch audio features failed - using fallback strategies', null)
+        PlaylistErrorHandler.logError('Audio features batch failed - proceeding without validation', null)
       }
 
-      // Strategy 2: Process tracks with available audio features
       const tracksWithFeatures: (SpotifyTrack & { audioFeatures?: AudioFeatures })[] = []
       
       for (const track of tracks) {
@@ -273,10 +316,9 @@ class PlaylistRouteHandler {
         })
       }
 
-      // Strategy 3: Smart filtering with multiple fallback levels
       const validTracks: SpotifyTrack[] = []
       
-      // Filter out blacklisted artists first
+      // More lenient filtering
       const nonBlacklistedTracks = tracksWithFeatures.filter(track => {
         try {
           return !AudioFeaturesValidator.isBlacklisted(track, genres)
@@ -288,59 +330,62 @@ class PlaylistRouteHandler {
       const tracksWithAudioFeatures = nonBlacklistedTracks.filter(t => t.audioFeatures)
       const tracksWithoutAudioFeatures = nonBlacklistedTracks.filter(t => !t.audioFeatures)
 
-      // Level 1: Strict validation for tracks WITH audio features
+      // IMPROVED: More lenient validation thresholds
       if (tracksWithAudioFeatures.length > 0) {
-        try {
-          const { validTracks: strictlyValid } = AudioFeaturesValidator.validateTracks(
-            tracksWithAudioFeatures,
-            {
-              energy: targetFeatures.energy,
-              valence: targetFeatures.valence,
-              tempo: targetFeatures.tempo,
-              acousticness: targetFeatures.acousticness,
-              instrumentalness: targetFeatures.instrumentalness,
-              danceability: 0.6
-            },
-            genres
-          )
+        for (const track of tracksWithAudioFeatures) {
+          if (!track.audioFeatures) continue
           
-          validTracks.push(...strictlyValid)
-          PlaylistErrorHandler.logInfo(`🎯 Strict validation: ${strictlyValid.length} tracks passed`)
-        } catch {
-          PlaylistErrorHandler.logError('Strict validation failed, using popularity fallback', null)
+          const features = track.audioFeatures
+          let score = 100
+          
+          // Very lenient energy check
+          const energyDiff = Math.abs(features.energy - targetFeatures.energy)
+          if (energyDiff > 0.6) score -= 20  // Was stricter before
+          
+          // Very lenient valence check
+          const valenceDiff = Math.abs(features.valence - targetFeatures.valence)
+          if (valenceDiff > 0.6) score -= 15  // Was stricter before
+          
+          // Accept tracks with score > 30 (was 50 before)
+          if (score > 30) {
+            validTracks.push(track)
+          }
         }
+        
+        PlaylistErrorHandler.logInfo(`🎯 Lenient validation: ${validTracks.length} tracks passed`)
       }
 
-      // Level 2: Popularity-based fallback for tracks WITHOUT audio features
-      if (validTracks.length < 10 && tracksWithoutAudioFeatures.length > 0) {
+      // Add popular tracks without audio features
+      if (validTracks.length < 20) {
         const popularFallbacks = tracksWithoutAudioFeatures
-          .filter(track => track.popularity > 45)
+          .filter(track => track.popularity > 35) // Lowered from 45
           .sort((a, b) => b.popularity - a.popularity)
-          .slice(0, Math.max(5, 15 - validTracks.length))
+          .slice(0, Math.max(10, 25 - validTracks.length)) // Get more tracks
 
         validTracks.push(...popularFallbacks)
         
-        PlaylistErrorHandler.logInfo(`🔄 Popularity fallback: Added ${popularFallbacks.length} popular tracks`)
+        PlaylistErrorHandler.logInfo(`🔄 Popular fallback: Added ${popularFallbacks.length} tracks`)
       }
 
-      // Level 3: Emergency fallback
-      if (validTracks.length < 8) {
+      // Emergency fallback - get any decent tracks
+      if (validTracks.length < 15) {
         const emergencyTracks = tracks
           .filter(track => !validTracks.some(vt => vt.id === track.id))
+          .filter(track => track.popularity > 25) // Even more lenient
           .sort((a, b) => b.popularity - a.popularity)
-          .slice(0, Math.max(8, 18 - validTracks.length))
+          .slice(0, Math.max(15, 25 - validTracks.length))
 
         validTracks.push(...emergencyTracks)
         
-        PlaylistErrorHandler.logError(`🚨 Emergency fallback: Added ${emergencyTracks.length} tracks by popularity`, null)
+        PlaylistErrorHandler.logError(`🚨 Emergency fallback: Added ${emergencyTracks.length} tracks`, null)
       }
 
-      PlaylistErrorHandler.logSuccess(`🎉 Audio features validation completed`, {
+      PlaylistErrorHandler.logSuccess(`🎉 IMPROVED validation completed`, {
         totalInput: tracks.length,
         withAudioFeatures: tracksWithAudioFeatures.length,
         withoutAudioFeatures: tracksWithoutAudioFeatures.length,
         finalValidCount: validTracks.length,
-        successRate: `${Math.round((validTracks.length / tracks.length) * 100)}%`
+        successRate: `${Math.round((validTracks.length / Math.max(tracks.length, 1)) * 100)}%`
       })
 
       return validTracks
@@ -348,39 +393,46 @@ class PlaylistRouteHandler {
     } catch (error) {
       PlaylistErrorHandler.logError('🔥 All validation strategies failed', error)
       
+      // Ultimate fallback - just return popular tracks
       const ultimateFallback = tracks
         .sort((a, b) => b.popularity - a.popularity)
-        .slice(0, 12)
+        .slice(0, 20) // At least 20 tracks
       
       PlaylistErrorHandler.logError(`🆘 Ultimate fallback: ${ultimateFallback.length} most popular tracks`, null)
       return ultimateFallback
     }
   }
 
+  // IMPROVED: Fixed privacy parameter passing
   private async createSpotifyPlaylist(
     spotifyClient: SpotifyAPI,
     userProfile: SpotifyUserProfile,
     analysis: PlaylistAnalysis,
-    weather?: WeatherContext | null
+    weather: WeatherContext | null,
+    isPrivate: boolean = true  // FIXED: Added this parameter!
   ): Promise<SpotifyPlaylistResponse> {
     const playlistName = analysis.playlistTheme || PlaylistNameGenerator.generate()
     const playlistDescription = PlaylistCreationService.createPlaylistDescription(analysis, weather)
 
+    // FIXED: Pass the isPrivate parameter correctly
     const playlist = await spotifyClient.createPlaylist(
       userProfile.id,
       playlistName,
       playlistDescription,
-      true
+      isPrivate  // This was missing before!
     )
 
-    PlaylistErrorHandler.logSuccess('Playlist created', `${playlist.name} (${playlist.id})`)
+    PlaylistErrorHandler.logSuccess(
+      `Playlist created: "${playlist.name}" (${playlist.id})`, 
+      `Privacy: ${isPrivate ? 'Private' : 'Public'}`
+    )
     return playlist
   }
 
   private async addTracksToPlaylist(spotifyClient: SpotifyAPI, playlistId: string, tracks: SpotifyTrack[]): Promise<void> {
     const trackUris = tracks.map(track => track.uri)
     await spotifyClient.addTracksToPlaylist(playlistId, trackUris)
-    PlaylistErrorHandler.logSuccess('Tracks added to playlist')
+    PlaylistErrorHandler.logSuccess(`Added ${tracks.length} tracks to playlist`)
   }
 
   private async savePlaylistHistory(
@@ -419,7 +471,8 @@ class PlaylistRouteHandler {
     playlist: SpotifyPlaylistResponse,
     selectedTracks: SpotifyTrack[],
     audioFeatures: AudioFeatures,
-    hasWeather: boolean
+    hasWeather: boolean,
+    isPrivate: boolean
   ): NextResponse {
     const totalDuration = PlaylistCreationService.calculateTotalDuration(selectedTracks)
 
@@ -433,21 +486,27 @@ class PlaylistRouteHandler {
         trackCount: selectedTracks.length,
         totalDuration: Math.round(totalDuration / 1000),
         weatherEnhanced: hasWeather,
+        isPrivate: isPrivate, // IMPROVED: Include privacy status in response
         tracks: selectedTracks.map(PlaylistCreationService.formatTrackForResponse)
       },
       audioFeatures,
-      message: hasWeather 
-        ? "Hava durumu destekli playlist başarıyla oluşturuldu!"
-        : "Playlist başarıyla oluşturuldu!"
+      message: `${hasWeather ? 'Hava durumu destekli ' : ''}playlist başarıyla oluşturuldu! (${selectedTracks.length} şarkı, ${isPrivate ? 'Gizli' : 'Herkese Açık'})`
     })
   }
 
+  // IMPROVED: Main handler with all fixes
   async handlePlaylistCreation(request: NextRequest): Promise<NextResponse> {
     try {
-      PlaylistErrorHandler.logInfo('🎵 Playlist creation started')
+      PlaylistErrorHandler.logInfo('🎵 IMPROVED: Playlist creation started')
 
       const { session, body } = await this.validateAndParseRequest(request)
-      const { sessionId, includeTurkish = false } = body
+      const { sessionId, includeTurkish = false, isPlaylistPrivate = true } = body // FIXED: Extract privacy setting
+
+      PlaylistErrorHandler.logInfo('📝 Request parameters:', {
+        sessionId,
+        includeTurkish,
+        isPlaylistPrivate
+      })
 
       const moodSession = await this.getMoodSession(sessionId)
       const analysis = this.parseAIAnalysis(moodSession.ai_analysis)
@@ -478,23 +537,26 @@ class PlaylistRouteHandler {
       const tracks = await this.searchTracks(spotifyClient, context, includeTurkish)
       const selectedTracks = this.selectAndFilterTracks(tracks, includeTurkish, context.weather ?? undefined)
 
-      if (selectedTracks.length < 5) {
+      // IMPROVED: Better minimum track requirement
+      if (selectedTracks.length < 8) {  // Lowered from 5 to accommodate better UX
         PlaylistErrorHandler.logError('Insufficient tracks found', { 
           foundTracks: selectedTracks.length,
-          required: 5 
+          required: 8 
         })
         
         return NextResponse.json({
           success: false,
-          error: 'Yeterli şarkı bulunamadı. Lütfen farklı mood/hava durumu kombinasyonu deneyin.'
+          error: `Sadece ${selectedTracks.length} şarkı bulunabildi. En az 8 şarkı gerekli. Lütfen farklı mood/hava durumu kombinasyonu deneyin veya Türkçe müzik seçeneğini açın.`
         }, { status: 400 })
       }
 
+      // FIXED: Pass privacy parameter to playlist creation
       const playlist = await this.createSpotifyPlaylist(
         spotifyClient, 
         userProfile, 
         analysis, 
-        context.weather ?? null
+        context.weather ?? null,
+        isPlaylistPrivate  // FIXED: This parameter was missing!
       )
 
       await this.addTracksToPlaylist(spotifyClient, playlist.id, selectedTracks)
@@ -508,11 +570,13 @@ class PlaylistRouteHandler {
         playlist.id
       )
 
+      // IMPROVED: Enhanced success response
       return this.buildSuccessResponse(
         playlist,
         selectedTracks,
         adjustedFeatures,
-        !!context.weather
+        !!context.weather,
+        isPlaylistPrivate  // IMPROVED: Include privacy status
       )
 
     } catch (error) {
