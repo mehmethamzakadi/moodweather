@@ -8,8 +8,8 @@ export * from './genres'
 export * from './filters'
 export * from './client'
 
-// Main client export
-export { SpotifyAPI } from './client'
+// Import SpotifyAPI specifically for the factory function
+import { SpotifyAPI } from './client'
 
 // Session'dan Spotify API client oluştur
 export function createSpotifyClient(session: { accessToken: string }) {

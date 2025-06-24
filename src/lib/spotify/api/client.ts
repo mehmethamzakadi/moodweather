@@ -15,6 +15,17 @@ import { filterAndDiversifyTracks } from './filters'
 // Spotify API base URL
 const SPOTIFY_API_BASE = 'https://api.spotify.com/v1'
 
+// Spotify audio features interface
+interface SpotifyAudioFeatures {
+  energy: number
+  valence: number
+  tempo: number
+  acousticness: number
+  instrumentalness: number
+  danceability?: number
+  [key: string]: number | string | undefined
+}
+
 // Spotify API helper class
 export class SpotifyAPI {
   private accessToken: string
@@ -50,14 +61,65 @@ export class SpotifyAPI {
     return this.makeRequest('/me')
   }
 
-  // Get audio features for a track
-  async getAudioFeaturesForTrack(trackId: string) {
+  // Get audio features for a track - improved with better error handling
+  async getAudioFeaturesForTrack(trackId: string): Promise<SpotifyAudioFeatures | null> {
     try {
       const endpoint = `/audio-features/${trackId}`
-      return await this.makeRequest(endpoint)
-    } catch (error) {
+      const result = await this.makeRequest(endpoint)
+      return result
+    } catch (error: unknown) {
+      // 403 hatası yaygın - session scope problemi olabilir
+      if (error instanceof Error && error.message?.includes('403')) {
+        console.warn(`⚠️ Audio features access denied for track ${trackId} - scope issue`)
+        return null
+      }
+      
+      // Diğer hatalar
       console.error(`Failed to get audio features for track ${trackId}:`, error)
       return null
+    }
+  }
+
+  // Batch audio features - multiple tracks at once (more efficient)
+  async getBatchAudioFeatures(trackIds: string[]): Promise<SpotifyAudioFeatures[]> {
+    if (trackIds.length === 0) return []
+    
+    try {
+      // Spotify API supports up to 100 tracks at once
+      const batchSize = 100
+      const batches: string[][] = []
+      
+      for (let i = 0; i < trackIds.length; i += batchSize) {
+        batches.push(trackIds.slice(i, i + batchSize))
+      }
+      
+      const allFeatures: SpotifyAudioFeatures[] = []
+      
+      for (const batch of batches) {
+        try {
+          const ids = batch.join(',')
+          const endpoint = `/audio-features?ids=${ids}`
+          const response = await this.makeRequest(endpoint)
+          
+          if (response.audio_features) {
+            // Filter out null results and add valid features
+            const validFeatures = response.audio_features.filter((features: SpotifyAudioFeatures | null) => features !== null)
+            allFeatures.push(...validFeatures)
+          }
+          
+          // Rate limiting
+          await new Promise(resolve => setTimeout(resolve, 100))
+        } catch (error: unknown) {
+          console.warn(`⚠️ Batch audio features failed for batch`, error instanceof Error ? error.message : 'Unknown error')
+          // Continue with other batches
+          continue
+        }
+      }
+      
+      return allFeatures
+    } catch (error) {
+      console.error('Batch audio features completely failed:', error)
+      return []
     }
   }
 

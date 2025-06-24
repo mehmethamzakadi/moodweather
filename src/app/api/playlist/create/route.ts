@@ -26,7 +26,6 @@ interface ExtendedSession extends Session {
   accessToken?: string
 }
 
-// User profile interface
 interface SpotifyUserProfile {
   id: string
   display_name: string
@@ -35,7 +34,6 @@ interface SpotifyUserProfile {
   images: { url: string }[]
 }
 
-// Playlist interface
 interface SpotifyPlaylistResponse {
   id: string
   name: string
@@ -45,7 +43,6 @@ interface SpotifyPlaylistResponse {
   tracks: { total: number }
 }
 
-// Analysis interface
 interface PlaylistAnalysis {
   moodAnalysis: string
   recommendedGenres: string[]
@@ -60,7 +57,6 @@ interface PlaylistAnalysis {
   }
 }
 
-// Mood session interface
 interface MoodSession {
   id: string
   user_id: string
@@ -73,12 +69,10 @@ class PlaylistRouteHandler {
     session: ExtendedSession
     body: PlaylistRequest
   }> {
-    // Validate session
     const session = await getServerSession(authOptions) as ExtendedSession
     const validation = PlaylistValidation.validateSession(session, session?.accessToken)
     if (!validation.isValid) throw validation.error
 
-    // Parse and validate request body
     const body: PlaylistRequest = await request.json()
     const requestValidation = PlaylistValidation.validateRequest(body)
     if (!requestValidation.isValid) throw requestValidation.error
@@ -124,7 +118,6 @@ class PlaylistRouteHandler {
     const weather = analysis.environmentalContext?.weather as WeatherContext | undefined
     const baseFeatures = SpotifyAPI.calculateAudioFeatures(analysis)
     
-    // Convert Spotify AudioFeatures to PlaylistContext AudioFeatures
     const audioFeatures: AudioFeatures = {
       energy: baseFeatures.energy,
       valence: baseFeatures.valence,
@@ -161,7 +154,6 @@ class PlaylistRouteHandler {
         genres: enhancedGenres.slice(0, 3)
       })
 
-      // Use enhanced search strategy with anti-repetition
       const rawTracks = await EnhancedSearchStrategy.executeAntiRepetitionSearch(
         spotifyClient,
         {
@@ -172,8 +164,7 @@ class PlaylistRouteHandler {
         }
       )
 
-      // Enhanced validation - this will solve the Cigarettes After Sex problem
-      const validatedTracks = await this.validateTracksWithAudioFeatures(
+      const validatedTracks = await this.validateTracksWithAudioFeaturesFallback(
         spotifyClient,
         rawTracks,
         adjustedFeatures,
@@ -189,7 +180,6 @@ class PlaylistRouteHandler {
     } catch (searchError) {
       PlaylistErrorHandler.logError('Enhanced search failed, falling back to original', searchError)
       
-      // Fallback to original search if enhanced search fails
       try {
         const fallbackTracks = await spotifyClient.searchTracksAdvanced({
           genres: context.genres,
@@ -229,84 +219,141 @@ class PlaylistRouteHandler {
     return selectedTracks
   }
 
-  // NEW: Enhanced validation method to prevent Cigarettes After Sex type mismatches
-  private async validateTracksWithAudioFeatures(
+  private async validateTracksWithAudioFeaturesFallback(
     spotifyClient: SpotifyAPI,
     tracks: SpotifyTrack[],
     targetFeatures: AudioFeatures,
     genres: string[]
   ): Promise<SpotifyTrack[]> {
+    
+    if (tracks.length === 0) {
+      PlaylistErrorHandler.logError('No tracks to validate', null)
+      return []
+    }
+
     try {
-      // Get audio features for all tracks
-      const tracksWithFeatures = await Promise.all(
-        tracks.map(async (track): Promise<SpotifyTrack & { audioFeatures?: AudioFeatures }> => {
-          try {
-            const audioFeatures = await AudioFeaturesValidator.getEnhancedAudioFeatures(
-              spotifyClient,
-              track.id
-            )
-            return { 
-              ...track, 
-              audioFeatures: audioFeatures ? {
-                energy: audioFeatures.energy,
-                valence: audioFeatures.valence,
-                tempo: audioFeatures.tempo,
-                acousticness: audioFeatures.acousticness ?? 0.5,
-                instrumentalness: audioFeatures.instrumentalness ?? 0.1
-              } : undefined 
-            }
-          } catch (error) {
-            PlaylistErrorHandler.logError(`Failed to get audio features for ${track.name}`, error)
-            return { ...track, audioFeatures: undefined }
-          }
-        })
-      )
-
-      // Filter out blacklisted artists for genre
-      const nonBlacklistedTracks = tracksWithFeatures.filter(track => 
-        !AudioFeaturesValidator.isBlacklisted(track, genres)
-      )
-
-      // Validate audio features compatibility
-      const { validTracks, invalidTracks, stats } = AudioFeaturesValidator.validateTracks(
-        nonBlacklistedTracks,
-        {
-          energy: targetFeatures.energy,
-          valence: targetFeatures.valence, 
-          tempo: targetFeatures.tempo,
-          acousticness: targetFeatures.acousticness,
-          instrumentalness: targetFeatures.instrumentalness,
-          danceability: 0.7 // High danceability for electronic music
-        },
-        genres
-      )
-
-      // Log validation results
-      PlaylistErrorHandler.logInfo('Audio features validation completed', {
-        totalTracks: tracks.length,
-        tracksWithFeatures: tracksWithFeatures.length,
-        nonBlacklisted: nonBlacklistedTracks.length,
-        validTracks: validTracks.length,
-        averageScore: Math.round(stats.averageScore),
-        rejectedCount: invalidTracks.length
+      PlaylistErrorHandler.logInfo('🔄 Starting robust audio features validation', {
+        trackCount: tracks.length,
+        targetEnergy: targetFeatures.energy,
+        targetValence: targetFeatures.valence
       })
 
-      // Log some rejected tracks for debugging
-      if (invalidTracks.length > 0) {
-        PlaylistErrorHandler.logInfo('Sample rejected tracks', 
-          invalidTracks.slice(0, 3).map(({ track, reason }) => ({
-            name: track.name,
-            artist: track.artists[0]?.name,
-            reason: reason.substring(0, 100)
-          }))
-        )
+      // Strategy 1: Try batch audio features
+      const audioFeaturesMap = new Map<string, AudioFeatures>()
+      
+      try {
+        const trackIds = tracks.map(t => t.id)
+        const batchFeatures = await spotifyClient.getBatchAudioFeatures(trackIds)
+        
+        batchFeatures.forEach((features, index) => {
+          if (features && trackIds[index]) {
+            audioFeaturesMap.set(trackIds[index], {
+              energy: features.energy ?? 0.5,
+              valence: features.valence ?? 0.5,
+              tempo: features.tempo ?? 120,
+              acousticness: features.acousticness ?? 0.5,
+              instrumentalness: features.instrumentalness ?? 0.1
+            })
+          }
+        })
+        
+        PlaylistErrorHandler.logInfo(`✅ Batch audio features: ${audioFeaturesMap.size}/${tracks.length} successful`)
+      } catch {
+        PlaylistErrorHandler.logError('⚠️ Batch audio features failed - using fallback strategies', null)
       }
 
+      // Strategy 2: Process tracks with available audio features
+      const tracksWithFeatures: (SpotifyTrack & { audioFeatures?: AudioFeatures })[] = []
+      
+      for (const track of tracks) {
+        const audioFeatures = audioFeaturesMap.get(track.id)
+        tracksWithFeatures.push({
+          ...track,
+          audioFeatures
+        })
+      }
+
+      // Strategy 3: Smart filtering with multiple fallback levels
+      const validTracks: SpotifyTrack[] = []
+      
+      // Filter out blacklisted artists first
+      const nonBlacklistedTracks = tracksWithFeatures.filter(track => {
+        try {
+          return !AudioFeaturesValidator.isBlacklisted(track, genres)
+        } catch {
+          return true
+        }
+      })
+
+      const tracksWithAudioFeatures = nonBlacklistedTracks.filter(t => t.audioFeatures)
+      const tracksWithoutAudioFeatures = nonBlacklistedTracks.filter(t => !t.audioFeatures)
+
+      // Level 1: Strict validation for tracks WITH audio features
+      if (tracksWithAudioFeatures.length > 0) {
+        try {
+          const { validTracks: strictlyValid } = AudioFeaturesValidator.validateTracks(
+            tracksWithAudioFeatures,
+            {
+              energy: targetFeatures.energy,
+              valence: targetFeatures.valence,
+              tempo: targetFeatures.tempo,
+              acousticness: targetFeatures.acousticness,
+              instrumentalness: targetFeatures.instrumentalness,
+              danceability: 0.6
+            },
+            genres
+          )
+          
+          validTracks.push(...strictlyValid)
+          PlaylistErrorHandler.logInfo(`🎯 Strict validation: ${strictlyValid.length} tracks passed`)
+        } catch {
+          PlaylistErrorHandler.logError('Strict validation failed, using popularity fallback', null)
+        }
+      }
+
+      // Level 2: Popularity-based fallback for tracks WITHOUT audio features
+      if (validTracks.length < 10 && tracksWithoutAudioFeatures.length > 0) {
+        const popularFallbacks = tracksWithoutAudioFeatures
+          .filter(track => track.popularity > 45)
+          .sort((a, b) => b.popularity - a.popularity)
+          .slice(0, Math.max(5, 15 - validTracks.length))
+
+        validTracks.push(...popularFallbacks)
+        
+        PlaylistErrorHandler.logInfo(`🔄 Popularity fallback: Added ${popularFallbacks.length} popular tracks`)
+      }
+
+      // Level 3: Emergency fallback
+      if (validTracks.length < 8) {
+        const emergencyTracks = tracks
+          .filter(track => !validTracks.some(vt => vt.id === track.id))
+          .sort((a, b) => b.popularity - a.popularity)
+          .slice(0, Math.max(8, 18 - validTracks.length))
+
+        validTracks.push(...emergencyTracks)
+        
+        PlaylistErrorHandler.logError(`🚨 Emergency fallback: Added ${emergencyTracks.length} tracks by popularity`, null)
+      }
+
+      PlaylistErrorHandler.logSuccess(`🎉 Audio features validation completed`, {
+        totalInput: tracks.length,
+        withAudioFeatures: tracksWithAudioFeatures.length,
+        withoutAudioFeatures: tracksWithoutAudioFeatures.length,
+        finalValidCount: validTracks.length,
+        successRate: `${Math.round((validTracks.length / tracks.length) * 100)}%`
+      })
+
       return validTracks
+
     } catch (error) {
-      PlaylistErrorHandler.logError('Audio features validation failed', error)
-      // Fallback to original tracks if validation fails
-      return tracks
+      PlaylistErrorHandler.logError('🔥 All validation strategies failed', error)
+      
+      const ultimateFallback = tracks
+        .sort((a, b) => b.popularity - a.popularity)
+        .slice(0, 12)
+      
+      PlaylistErrorHandler.logError(`🆘 Ultimate fallback: ${ultimateFallback.length} most popular tracks`, null)
+      return ultimateFallback
     }
   }
 
@@ -323,7 +370,7 @@ class PlaylistRouteHandler {
       userProfile.id,
       playlistName,
       playlistDescription,
-      true // private by default
+      true
     )
 
     PlaylistErrorHandler.logSuccess('Playlist created', `${playlist.name} (${playlist.id})`)
@@ -397,30 +444,24 @@ class PlaylistRouteHandler {
 
   async handlePlaylistCreation(request: NextRequest): Promise<NextResponse> {
     try {
-      PlaylistErrorHandler.logInfo('Playlist creation started')
+      PlaylistErrorHandler.logInfo('🎵 Playlist creation started')
 
-      // 1. Validate and parse request
       const { session, body } = await this.validateAndParseRequest(request)
       const { sessionId, includeTurkish = false } = body
 
-      // 2. Get mood session
       const moodSession = await this.getMoodSession(sessionId)
-
-      // 3. Parse AI analysis
       const analysis = this.parseAIAnalysis(moodSession.ai_analysis)
       
-      PlaylistErrorHandler.logInfo('AI analysis loaded', {
+      PlaylistErrorHandler.logInfo('🧠 AI analysis loaded', {
         genres: analysis.recommendedGenres,
         energyLevel: analysis.energyLevel,
         valence: analysis.valence,
         hasWeatherData: !!analysis.environmentalContext?.weather
       })
 
-      // 4. Setup Spotify client and get user profile
       const spotifyClient = createSpotifyClient({ accessToken: session.accessToken! })
       const userProfile = await this.getSpotifyUserProfile(spotifyClient)
 
-      // 5. Build context and adjust audio features for weather
       const context = this.buildPlaylistContext(analysis)
       const adjustedFeatures = PlaylistCreationService.adjustAudioFeaturesForWeather(
         context.audioFeatures,
@@ -428,17 +469,27 @@ class PlaylistRouteHandler {
       )
 
       if (context.weather) {
-        PlaylistErrorHandler.logInfo('Weather data integrated', {
+        PlaylistErrorHandler.logInfo('🌤️ Weather data integrated', {
           condition: context.weather.condition,
           temperature: context.weather.temperature
         })
       }
 
-      // 6. Search and filter tracks
       const tracks = await this.searchTracks(spotifyClient, context, includeTurkish)
       const selectedTracks = this.selectAndFilterTracks(tracks, includeTurkish, context.weather ?? undefined)
 
-      // 7. Create Spotify playlist
+      if (selectedTracks.length < 5) {
+        PlaylistErrorHandler.logError('Insufficient tracks found', { 
+          foundTracks: selectedTracks.length,
+          required: 5 
+        })
+        
+        return NextResponse.json({
+          success: false,
+          error: 'Yeterli şarkı bulunamadı. Lütfen farklı mood/hava durumu kombinasyonu deneyin.'
+        }, { status: 400 })
+      }
+
       const playlist = await this.createSpotifyPlaylist(
         spotifyClient, 
         userProfile, 
@@ -446,10 +497,8 @@ class PlaylistRouteHandler {
         context.weather ?? null
       )
 
-      // 8. Add tracks to playlist
       await this.addTracksToPlaylist(spotifyClient, playlist.id, selectedTracks)
 
-      // 9. Save playlist history
       await this.savePlaylistHistory(
         moodSession,
         playlist.name,
@@ -459,7 +508,6 @@ class PlaylistRouteHandler {
         playlist.id
       )
 
-      // 10. Return success response
       return this.buildSuccessResponse(
         playlist,
         selectedTracks,
