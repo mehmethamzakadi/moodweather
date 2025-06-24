@@ -6,386 +6,260 @@ import { authOptions } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { createSpotifyClient, SpotifyAPI } from "@/lib/spotify/api"
 import type { SpotifyTrack } from "@/lib/spotify/api"
-import { WeatherAPI, WeatherData } from "@/lib/weather/api"
+import type { AudioFeatures } from "@/lib/playlist/services"
+import {
+  PlaylistCreationService,
+  WeatherGenreEnhancer,
+  PlaylistNameGenerator,
+  type WeatherContext,
+  type PlaylistRequest,
+  type PlaylistContext
+} from "@/lib/playlist/services"
+import {
+  PlaylistValidation,
+  PlaylistErrorHandler
+} from "@/lib/playlist/validation"
 
-interface WeatherContext {
-  condition: string
-  temperature: number
+interface ExtendedSession extends Session {
+  accessToken?: string
+}
+
+// User profile interface
+interface SpotifyUserProfile {
+  id: string
+  display_name: string
+  email: string
+  followers: { total: number }
+  images: { url: string }[]
+}
+
+// Playlist interface
+interface SpotifyPlaylistResponse {
+  id: string
+  name: string
   description: string
-  humidity: number
-  windSpeed: number
-  // WeatherData ile uyumlu olması için eksik alanları ekle
-  pressure?: number
-  visibility?: number
-  location?: string
-  country?: string
-  city?: string
-  windDirection?: number
-  uvIndex?: number
-  cloudCover?: number
+  external_urls: { spotify: string }
+  images: { url: string }[]
+  tracks: { total: number }
 }
 
-interface TimeEffect {
-  timeOfDay: string
-  energyModifier: number
-  valenceModifier: number
-}
-
-// Hava durumu için tempo ayarlama
-function adjustTempoForWeather(baseTempo: number, weather: WeatherContext, timeEffect: TimeEffect): number {
-  let adjustedTempo = baseTempo
-  
-  // Hava durumu etkisi
-  switch (weather.condition) {
-    case "clear":
-      adjustedTempo += 10 // Güneşli havada daha hareketli
-      break
-    case "clear-night":
-      adjustedTempo -= 15 // Gece daha sakin
-      break
-    case "rainy":
-      adjustedTempo -= 20 // Yağmurda daha yavaş
-      break
-    case "stormy":
-      adjustedTempo += 5 // Fırtınada orta tempo
-      break
-    case "cloudy":
-    case "cloudy-night":
-      adjustedTempo -= 10 // Bulutlu havada sakin
-      break
-  }
-  
-  // Zaman dilimi etkisi
-  if (timeEffect.timeOfDay === "night") {
-    adjustedTempo -= 15
-  } else if (timeEffect.timeOfDay === "morning") {
-    adjustedTempo += 10
-  }
-  
-  return Math.max(60, Math.min(180, adjustedTempo))
-}
-
-// Hava durumu için acousticness ayarlama
-function adjustAcousticnessForWeather(baseAcousticness: number, weather: WeatherContext): number {
-  let adjusted = baseAcousticness
-  
-  switch (weather.condition) {
-    case "rainy":
-    case "cloudy-night":
-      adjusted += 0.2 // Yağmur/gece daha akustik
-      break
-    case "clear":
-      adjusted -= 0.1 // Güneş daha elektronik
-      break
-    case "clear-night":
-      adjusted += 0.15 // Gece akustik
-      break
-  }
-  
-  return Math.max(0.1, Math.min(0.9, adjusted))
-}
-
-// Hava durumu için instrumentalness ayarlama
-function adjustInstrumentalness(baseInstrumental: number, weather: WeatherContext, timeEffect: TimeEffect): number {
-  let adjusted = baseInstrumental
-  
-  if (timeEffect.timeOfDay === "night") {
-    adjusted += 0.1 // Gece daha enstrümental
-  }
-  
-  if (weather.condition === "foggy" || weather.condition === "cloudy-night") {
-    adjusted += 0.15 // Sisli/bulutlu gece daha enstrümental
-  }
-  
-  return Math.max(0.0, Math.min(0.8, adjusted))
-}
-
-// Hava durumu ile türleri genişletme
-function enhanceGenresWithWeather(baseGenres: string[], weather: WeatherContext | null): string[] {
-  const enhanced = [...baseGenres]
-  
-  if (!weather) return enhanced
-  
-  switch (weather.condition) {
-    case "rainy":
-      enhanced.push("jazz", "blues", "lo-fi", "indie")
-      break
-    case "clear":
-      enhanced.push("pop", "dance", "electronic", "upbeat")
-      break
-    case "clear-night":
-      enhanced.push("ambient", "chillout", "downtempo")
-      break
-    case "cloudy-night":
-      enhanced.push("atmospheric", "post-rock", "ambient")
-      break
-    case "stormy":
-      enhanced.push("alternative", "rock", "dramatic")
-      break
-  }
-  
-  return [...new Set(enhanced)] // Tekrarları kaldır
-}
-
-// WeatherContext'i WeatherData'ya dönüştür
-function convertWeatherContextToWeatherData(weather: WeatherContext): WeatherData {
-  return {
-    temperature: weather.temperature,
-    description: weather.description,
-    condition: weather.condition,
-    humidity: weather.humidity,
-    windSpeed: weather.windSpeed,
-    pressure: weather.pressure || 1013,
-    visibility: weather.visibility || 10,
-    location: weather.location || "Unknown",
-    country: weather.country || "Unknown",
-    timezone: "UTC",
-    icon: "01d",
-    sunrise: Date.now() / 1000,
-    sunset: Date.now() / 1000 + 43200,
-    uvIndex: weather.uvIndex || 0,
-    coordinates: {
-      lat: 0,
-      lon: 0
-    }
+// Analysis interface
+interface PlaylistAnalysis {
+  moodAnalysis: string
+  recommendedGenres: string[]
+  energyLevel: 'low' | 'medium' | 'high'
+  valence: 'negative' | 'neutral' | 'positive'
+  moodScore: number
+  playlistTheme?: string
+  environmentalContext?: {
+    weather?: WeatherContext
+    energyModifier?: number
+    valenceModifier?: number
   }
 }
 
-// Yaratıcı playlist isimleri
-function generateCreativePlaylistName(): string {
-  const creativeNames = [
-    "Sessiz Anların Müziği",
-    "İç Sesler ve Yankılar",
-    "Düşüncelerin Melodisi", 
-    "Huzurun Ritmi",
-    "Duygusal Yolculuk",
-    "Anın Sesi",
-    "Kalbin Müziği",
-    "Ruhsal Dengeleme",
-    "Zihnin Sakinliği",
-    "Duyguların Dansı",
-    "İçsel Armoni",
-    "Sessiz Çığlıklar",
-    "Melankolinin İzleri",
-    "Umudun Notaları",
-    "Geçmişin Yankıları",
-    "Geleceğin Fısıltıları"
-  ]
-  
-  return creativeNames[Math.floor(Math.random() * creativeNames.length)]
+// Mood session interface
+interface MoodSession {
+  id: string
+  user_id: string
+  ai_analysis: string
+  created_at: string
 }
 
-export async function POST(request: NextRequest) {
-  try {
-    // Session kontrol et
-    const session = await getServerSession(authOptions)
-    const extendedSession = session as Session & { accessToken?: string }
-    
-    if (!session?.user?.email || !extendedSession.accessToken) {
-      return NextResponse.json(
-        { error: "Spotify giriş yapmış kullanıcı gerekli" },
-        { status: 401 }
-      )
-    }
+class PlaylistRouteHandler {
+  private async validateAndParseRequest(request: NextRequest): Promise<{
+    session: ExtendedSession
+    body: PlaylistRequest
+  }> {
+    // Validate session
+    const session = await getServerSession(authOptions) as ExtendedSession
+    const validation = PlaylistValidation.validateSession(session, session?.accessToken)
+    if (!validation.isValid) throw validation.error
 
-    // Request body'yi parse et
-    const { sessionId, includeTurkish = false, isPlaylistPrivate = true } = await request.json()
+    // Parse and validate request body
+    const body: PlaylistRequest = await request.json()
+    const requestValidation = PlaylistValidation.validateRequest(body)
+    if (!requestValidation.isValid) throw requestValidation.error
 
-    if (!sessionId) {
-      return NextResponse.json(
-        { error: "Session ID gerekli" },
-        { status: 400 }
-      )
-    }
+    return { session, body }
+  }
 
-    console.log('🎵 Playlist oluşturma başlatılıyor...', { sessionId, userEmail: session.user.email })
-
-    // Mood session'ı Supabase'den al
+  private async getMoodSession(sessionId: string) {
     const { data: moodSession, error: sessionError } = await supabase
       .from('mood_sessions')
       .select('*')
       .eq('id', sessionId)
       .single()
 
-    if (sessionError || !moodSession) {
-      console.error('Mood session bulunamadı:', sessionError)
-      return NextResponse.json(
-        { error: "Mood session bulunamadı" },
-        { status: 404 }
-      )
-    }
+    const validation = PlaylistValidation.validateMoodSession(moodSession, sessionError)
+    if (!validation.isValid) throw validation.error
 
-    // AI analizini parse et
-    let analysis
+    return moodSession
+  }
+
+  private parseAIAnalysis(aiAnalysisString: string) {
+    const validation = PlaylistValidation.validateAIAnalysis(aiAnalysisString)
+    if (!validation.isValid) throw validation.error
+
+    return JSON.parse(aiAnalysisString)
+  }
+
+  private async getSpotifyUserProfile(spotifyClient: SpotifyAPI): Promise<SpotifyUserProfile> {
     try {
-      analysis = JSON.parse(moodSession.ai_analysis)
-    } catch (parseError) {
-      console.error('AI analizi parse edilemedi:', parseError)
-      return NextResponse.json(
-        { error: "AI analizi geçersiz" },
-        { status: 400 }
-      )
-    }
-
-    console.log('🤖 AI analizi:', {
-      genres: analysis.recommendedGenres,
-      energyLevel: analysis.energyLevel,
-      valence: analysis.valence,
-      moodScore: analysis.moodScore,
-      hasWeatherData: !!analysis.environmentalContext?.weather
-    })
-
-    // Spotify API client oluştur
-    const spotifyClient = createSpotifyClient({ accessToken: extendedSession.accessToken })
-
-    // Test user profile
-    let userProfile: { id: string; display_name: string }
-    try {
-      userProfile = await spotifyClient.getUserProfile()
-      console.log('✅ Spotify getUserProfile() başarılı:', userProfile.display_name, userProfile.id)
+      const userProfile = await spotifyClient.getUserProfile()
+      PlaylistErrorHandler.logSuccess('Spotify getUserProfile()', 
+        `${userProfile.display_name} (${userProfile.id})`)
+      return userProfile
     } catch (profileError) {
-      console.error('❌ getUserProfile() başarısız:', profileError)
-      return NextResponse.json(
-        { error: "Spotify access token geçersiz. Lütfen çıkış yapıp tekrar giriş yapın." },
-        { status: 401 }
-      )
+      PlaylistErrorHandler.logError('getUserProfile() failed', profileError)
+      const validation = PlaylistValidation.validateSpotifyProfile(profileError)
+      if (!validation.isValid) throw validation.error
+      throw new Error('Spotify profile validation failed')
     }
+  }
 
-    // HAVA DURUMU DESTEKLİ Audio features hesapla
-    let audioFeatures = SpotifyAPI.calculateAudioFeatures(analysis)
+  private buildPlaylistContext(analysis: PlaylistAnalysis): PlaylistContext {
+    const weather = analysis.environmentalContext?.weather as WeatherContext | undefined
+    const baseFeatures = SpotifyAPI.calculateAudioFeatures(analysis)
     
-    // Hava durumu verisi varsa audio features'ı ayarla
-    if (analysis.environmentalContext?.weather) {
-      const weather = analysis.environmentalContext.weather as WeatherContext
-      
-      // WeatherContext'i WeatherData'ya dönüştür (DÜZELTİLDİ)
-      const weatherData = convertWeatherContextToWeatherData(weather)
-      const weatherMoodFactor = WeatherAPI.calculateMoodFactor(weatherData)
-      const timeEffect = WeatherAPI.calculateTimeEffect()
-      
-      console.log('🌤️ Hava durumu verileri playlist\'e dahil ediliyor...', {
-        condition: weather.condition,
-        temperature: weather.temperature,
-        energyModifier: weatherMoodFactor.energyModifier,
-        valenceModifier: weatherMoodFactor.valenceModifier
-      })
-      
-      // Audio features'ı hava durumuna göre ayarla (NULL CHECK EKLENDİ)
-      const energyModifier = analysis.environmentalContext?.energyModifier ?? 0
-      const valenceModifier = analysis.environmentalContext?.valenceModifier ?? 0
-      
-      audioFeatures = {
-        ...audioFeatures,
-        energy: Math.max(0.1, Math.min(0.9, audioFeatures.energy + energyModifier)),
-        valence: Math.max(0.1, Math.min(0.9, audioFeatures.valence + valenceModifier)),
-        tempo: adjustTempoForWeather(audioFeatures.tempo ?? 120, weather, timeEffect),
-        acousticness: adjustAcousticnessForWeather(audioFeatures.acousticness ?? 0.5, weather),
-        instrumentalness: adjustInstrumentalness(audioFeatures.instrumentalness ?? 0.0, weather, timeEffect)
-      }
-      
-      console.log('🎚️ Hava durumu ayarlı audio features:', audioFeatures)
-    } else {
-      console.log('🎚️ Standart audio features:', audioFeatures)
+    // Convert Spotify AudioFeatures to PlaylistContext AudioFeatures
+    const audioFeatures: AudioFeatures = {
+      energy: baseFeatures.energy,
+      valence: baseFeatures.valence,
+      tempo: baseFeatures.tempo,
+      acousticness: baseFeatures.acousticness || 0.5,
+      instrumentalness: baseFeatures.instrumentalness || 0.1
     }
+    
+    return {
+      analysis,
+      weather,
+      audioFeatures,
+      genres: analysis.recommendedGenres
+    }
+  }
 
-    // HAVA DURUMU DESTEKLİ şarkı önerileri al
-    let tracks: SpotifyTrack[] = []
-    
-    console.log('🎵 Hava durumu destekli playlist algoritması başlatılıyor...', { includeTurkish })
-    
+  private async searchTracks(
+    spotifyClient: SpotifyAPI, 
+    context: PlaylistContext, 
+    includeTurkish: boolean
+  ): Promise<SpotifyTrack[]> {
     try {
-      // Çeşitli arama stratejileri ile şarkı topla
-      tracks = await spotifyClient.searchTracksAdvanced({
-        genres: enhanceGenresWithWeather(analysis.recommendedGenres, analysis.environmentalContext?.weather),
-        audioFeatures,
+      const enhancedGenres = WeatherGenreEnhancer.enhance(context.genres, context.weather ?? null)
+      const adjustedFeatures = PlaylistCreationService.adjustAudioFeaturesForWeather(
+        context.audioFeatures, 
+        context
+      )
+
+      PlaylistErrorHandler.logInfo('Weather-enhanced search starting', { 
+        includeTurkish,
+        weatherCondition: context.weather?.condition 
+      })
+
+      const tracks = await spotifyClient.searchTracksAdvanced({
+        genres: enhancedGenres,
+        audioFeatures: adjustedFeatures,
         includeTurkish,
         limit: 50,
-        weatherContext: analysis.environmentalContext?.weather
+        weatherContext: context.weather
       })
-      
-      console.log(`🔍 Toplam ${tracks.length} şarkı bulundu (hava durumu faktörlü)`)
-      
+
+      PlaylistErrorHandler.logSuccess(`Found ${tracks.length} tracks`, 'weather-enhanced search')
+      return tracks
     } catch (searchError) {
-      console.error('🚫 Search API başarısız:', searchError)
-      return NextResponse.json(
-        { error: "Spotify'dan şarkı alınamadı. Lütfen daha sonra tekrar deneyin." },
-        { status: 503 }
-      )
+      throw PlaylistErrorHandler.handleSearchError(searchError)
     }
+  }
 
-    if (tracks.length === 0) {
-      return NextResponse.json(
-        { error: "Bu ruh haline uygun şarkı bulunamadı" },
-        { status: 404 }
-      )
-    }
+  private selectAndFilterTracks(
+    tracks: SpotifyTrack[], 
+    includeTurkish: boolean, 
+    weather?: WeatherContext
+  ): SpotifyTrack[] {
+    const validation = PlaylistValidation.validateTracks(tracks)
+    if (!validation.isValid) throw validation.error
 
-    // Gelişmiş şarkı filtreleme ve çeşitlilik algoritması
     const selectedTracks = SpotifyAPI.filterAndDiversifyTracks(tracks, {
       maxPerArtist: 2,
       minPopularity: 25,
       targetCount: 20,
       includeTurkish,
-      weatherPreference: analysis.environmentalContext?.weather
+      weatherPreference: weather
     })
 
-    console.log(`✨ ${selectedTracks.length} şarkı seçildi (${tracks.length} adetten)`)
+    PlaylistErrorHandler.logSuccess(
+      `Selected ${selectedTracks.length} tracks from ${tracks.length} candidates`
+    )
+    
+    return selectedTracks
+  }
 
-    // Playlist adı ve açıklaması oluştur (konumdan bağımsız)
-    const playlistName = analysis.playlistTheme || generateCreativePlaylistName()
-    
-    let playlistDescription = `${analysis.moodAnalysis.substring(0, 150)}...`
-    
-    // Hava durumu bilgisini açıklamaya ekle
-    if (analysis.environmentalContext?.weather) {
-      const weather = analysis.environmentalContext.weather as WeatherContext
-      playlistDescription += ` 🌤️ ${weather.temperature}°C ${weather.description} hava koşulları dikkate alınarak oluşturuldu.`
-    }
-    
-    playlistDescription += ` (MoodWeather AI)`
+  private async createSpotifyPlaylist(
+    spotifyClient: SpotifyAPI,
+    userProfile: SpotifyUserProfile,
+    analysis: PlaylistAnalysis,
+    weather?: WeatherContext | null
+  ): Promise<SpotifyPlaylistResponse> {
+    const playlistName = analysis.playlistTheme || PlaylistNameGenerator.generate()
+    const playlistDescription = PlaylistCreationService.createPlaylistDescription(analysis, weather)
 
-    // Spotify'da playlist oluştur
     const playlist = await spotifyClient.createPlaylist(
       userProfile.id,
       playlistName,
       playlistDescription,
-      isPlaylistPrivate
+      true // private by default
     )
 
-    console.log('📝 Playlist oluşturuldu:', playlist.name, playlist.id)
+    PlaylistErrorHandler.logSuccess('Playlist created', `${playlist.name} (${playlist.id})`)
+    return playlist
+  }
 
-    // Şarkıları playlist'e ekle
-    const trackUris = selectedTracks.map(track => track.uri)
-    await spotifyClient.addTracksToPlaylist(playlist.id, trackUris)
+  private async addTracksToPlaylist(spotifyClient: SpotifyAPI, playlistId: string, tracks: SpotifyTrack[]): Promise<void> {
+    const trackUris = tracks.map(track => track.uri)
+    await spotifyClient.addTracksToPlaylist(playlistId, trackUris)
+    PlaylistErrorHandler.logSuccess('Tracks added to playlist')
+  }
 
-    console.log('🎶 Şarkılar playlist\'e eklendi')
+  private async savePlaylistHistory(
+    moodSession: MoodSession,
+    playlistName: string,
+    selectedTracks: SpotifyTrack[],
+    audioFeatures: AudioFeatures,
+    genres: string[],
+    playlistId: string
+  ): Promise<void> {
+    const totalDuration = PlaylistCreationService.calculateTotalDuration(selectedTracks)
 
-    // Playlist bilgilerini hesapla
-    const totalDuration = selectedTracks.reduce((sum, track) => sum + track.duration_ms, 0)
-
-    // Supabase'e playlist kaydını ekle
     const { error: insertError } = await supabase
       .from('playlist_history')
       .insert({
         user_id: moodSession.user_id,
-        session_id: sessionId,
+        session_id: moodSession.id,
         playlist_name: playlistName,
         track_count: selectedTracks.length,
         total_duration: Math.round(totalDuration / 1000),
         average_energy: audioFeatures.energy,
         average_valence: audioFeatures.valence,
         average_tempo: audioFeatures.tempo,
-        genres: analysis.recommendedGenres.join(', '),
-        spotify_playlist_id: playlist.id,
+        genres: genres.join(', '),
+        spotify_playlist_id: playlistId,
         generated_at: new Date().toISOString(),
         play_count: 0
       })
 
     if (insertError) {
-      console.error('Playlist history kaydetme hatası:', insertError)
+      PlaylistErrorHandler.logError('Playlist history save failed', insertError)
     }
+  }
 
-    // Başarılı response
+  private buildSuccessResponse(
+    playlist: SpotifyPlaylistResponse,
+    selectedTracks: SpotifyTrack[],
+    audioFeatures: AudioFeatures,
+    hasWeather: boolean
+  ): NextResponse {
+    const totalDuration = PlaylistCreationService.calculateTotalDuration(selectedTracks)
+
     return NextResponse.json({
       success: true,
       playlist: {
@@ -395,35 +269,98 @@ export async function POST(request: NextRequest) {
         spotifyUrl: playlist.external_urls.spotify,
         trackCount: selectedTracks.length,
         totalDuration: Math.round(totalDuration / 1000),
-        weatherEnhanced: !!analysis.environmentalContext?.weather,
-        tracks: selectedTracks.map(track => ({
-          id: track.id,
-          name: track.name,
-          artist: track.artists[0]?.name,
-          album: track.album.name,
-          image: track.album.images[0]?.url,
-          spotifyUrl: track.external_urls.spotify,
-          previewUrl: track.preview_url,
-          duration: track.duration_ms
-        }))
+        weatherEnhanced: hasWeather,
+        tracks: selectedTracks.map(PlaylistCreationService.formatTrackForResponse)
       },
       audioFeatures,
-      message: analysis.environmentalContext?.weather 
+      message: hasWeather 
         ? "Hava durumu destekli playlist başarıyla oluşturuldu!"
         : "Playlist başarıyla oluşturuldu!"
     })
-
-  } catch (error) {
-    console.error('💥 Playlist oluşturma hatası:', error)
-    
-    const errorMessage = error instanceof Error ? error.message : 'Bilinmeyen hata oluştu'
-    
-    return NextResponse.json(
-      { 
-        error: "Playlist oluşturulurken bir hata oluştu",
-        details: process.env.NODE_ENV === "development" ? errorMessage : undefined
-      },
-      { status: 500 }
-    )
   }
+
+  async handlePlaylistCreation(request: NextRequest): Promise<NextResponse> {
+    try {
+      PlaylistErrorHandler.logInfo('Playlist creation started')
+
+      // 1. Validate and parse request
+      const { session, body } = await this.validateAndParseRequest(request)
+      const { sessionId, includeTurkish = false } = body
+
+      // 2. Get mood session
+      const moodSession = await this.getMoodSession(sessionId)
+
+      // 3. Parse AI analysis
+      const analysis = this.parseAIAnalysis(moodSession.ai_analysis)
+      
+      PlaylistErrorHandler.logInfo('AI analysis loaded', {
+        genres: analysis.recommendedGenres,
+        energyLevel: analysis.energyLevel,
+        valence: analysis.valence,
+        hasWeatherData: !!analysis.environmentalContext?.weather
+      })
+
+      // 4. Setup Spotify client and get user profile
+      const spotifyClient = createSpotifyClient({ accessToken: session.accessToken! })
+      const userProfile = await this.getSpotifyUserProfile(spotifyClient)
+
+      // 5. Build context and adjust audio features for weather
+      const context = this.buildPlaylistContext(analysis)
+      const adjustedFeatures = PlaylistCreationService.adjustAudioFeaturesForWeather(
+        context.audioFeatures,
+        context
+      )
+
+      if (context.weather) {
+        PlaylistErrorHandler.logInfo('Weather data integrated', {
+          condition: context.weather.condition,
+          temperature: context.weather.temperature
+        })
+      }
+
+      // 6. Search and filter tracks
+      const tracks = await this.searchTracks(spotifyClient, context, includeTurkish)
+      const selectedTracks = this.selectAndFilterTracks(tracks, includeTurkish, context.weather ?? undefined)
+
+      // 7. Create Spotify playlist
+      const playlist = await this.createSpotifyPlaylist(
+        spotifyClient, 
+        userProfile, 
+        analysis, 
+        context.weather ?? null
+      )
+
+      // 8. Add tracks to playlist
+      await this.addTracksToPlaylist(spotifyClient, playlist.id, selectedTracks)
+
+      // 9. Save playlist history
+      await this.savePlaylistHistory(
+        moodSession,
+        playlist.name,
+        selectedTracks,
+        adjustedFeatures,
+        analysis.recommendedGenres,
+        playlist.id
+      )
+
+      // 10. Return success response
+      return this.buildSuccessResponse(
+        playlist,
+        selectedTracks,
+        adjustedFeatures,
+        !!context.weather
+      )
+
+    } catch (error) {
+      if (error instanceof NextResponse) {
+        return error
+      }
+      return PlaylistErrorHandler.handleGenericError(error)
+    }
+  }
+}
+
+export async function POST(request: NextRequest) {
+  const handler = new PlaylistRouteHandler()
+  return handler.handlePlaylistCreation(request)
 }

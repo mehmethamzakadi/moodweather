@@ -55,7 +55,7 @@ interface SpotifyPlaylist {
 }
 
 // Analysis interface for audio features calculation
-interface MoodAnalysis {
+interface AnalysisForAudioFeatures {
   energyLevel?: 'low' | 'medium' | 'high'
   valence?: 'negative' | 'neutral' | 'positive'
   moodScore?: number
@@ -475,7 +475,7 @@ export class SpotifyAPI {
     minPopularity: number;
     targetCount: number;
     includeTurkish?: boolean;
-    weatherPreference?: WeatherContext;
+    weatherPreference?: WeatherContext | null;
   }): SpotifyTrack[] {
     const { maxPerArtist, minPopularity, targetCount, includeTurkish = false } = options
     
@@ -523,7 +523,7 @@ export class SpotifyAPI {
   }
 
   // AI analizine göre audio features hesapla
-  static calculateAudioFeatures(analysis: MoodAnalysis): AudioFeatures {
+  static calculateAudioFeatures(analysis: AnalysisForAudioFeatures): AudioFeatures {
     let energy = 0.5
     let valence = 0.5
     let tempo = 120
